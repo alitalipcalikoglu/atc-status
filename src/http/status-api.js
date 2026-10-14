@@ -8,6 +8,7 @@ import { ApiKeyAuth } from './api-key-auth.js';
 import { Schemas } from './schemas.js';
 import { StatusPage } from './status-page.js';
 import { Views } from './views.js';
+import { AuditMetrics } from '../audit-metrics.js';
 
 /** @typedef {import('../config.js').Config} Config */
 /** @typedef {import('fastify').FastifyInstance} FastifyInstance */
@@ -170,6 +171,7 @@ export class StatusApi {
         '# HELP status_incident_open Whether a monitor has an open incident.',
         '# TYPE status_incident_open gauge',
         ...ms.map((m) => `status_incident_open{monitor="${label(m.id)}"} ${s.store.openOf(m.id) ? 1 : 0}`),
+        ...AuditMetrics.lines(this.audit),
         '# HELP status_process_uptime_seconds Process uptime.',
         '# TYPE status_process_uptime_seconds gauge',
         `status_process_uptime_seconds ${process.uptime().toFixed(0)}`,

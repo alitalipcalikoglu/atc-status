@@ -97,6 +97,8 @@ With `AUDIT_URL` and `AUDIT_API_KEY` set, `atc-status.monitor.upsert` (meta: cre
 
 Request logs with request id and trace context; incident open/close log lines; `/metrics` (up, latency, open incident per monitor); `/v1/stats`; `/ready`.
 
+Audit forwarding is observable too: `audit_forward_enabled`, `audit_forward_events_total{result="recorded|sent|dropped|failed"}` and `audit_forward_pending`. A rising `dropped`, or a `pending` that does not drain, means audit events are being lost or delayed; alert on it.
+
 ## Backup / restore
 
 The SQLite file at `DB_PATH` (atc-backup can copy it). After a restore, monitors continue at their next due time and open incidents close at the next passing check.
