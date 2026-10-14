@@ -416,7 +416,7 @@ components:
       properties:
         name: { type: string, minLength: 1, maxLength: 100 }
         description: { type: string, maxLength: 500 }
-        kind: { type: string, enum: [http, tcp, tls, heartbeat], description: "Fixed at creation; default `http`. `tcp` and `tls` take `url` as `https://host:port` (only host and port are used). `heartbeat` has no target: the monitored job pings `/v1/ping/{id}/{token}` within `intervalSec` plus `graceSec`." }
+        kind: { type: string, enum: [http, tcp, tls, heartbeat], description: "Fixed at creation; default `http`. `tcp` and `tls` take an https URL with host and port as `url` (only host and port are used). `heartbeat` has no target: the monitored job pings `/v1/ping/{id}/{token}` within `intervalSec` plus `graceSec`." }
         url: { type: string, minLength: 8, maxLength: 2000, pattern: "^https?://" }
         method: { type: string, enum: [GET, HEAD] }
         expectText: { type: [string, "null"], maxLength: 200, description: "http with GET only: text the first KiB of the body must contain." }
