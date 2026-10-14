@@ -7,7 +7,7 @@ const FAIL = { ok: false, status: 500, latencyMs: 3, error: 'unexpected status 5
 test('API: probes, info, auth', async (t) => {
   const { app } = await buildApp();
   t.after(() => app.close());
-  assert.deepEqual(JSON.parse((await app.inject({ url: '/ready' })).body), { status: 'ok', monitors: 0, checker: 'running', notify: 'disabled' });
+  assert.deepEqual(JSON.parse((await app.inject({ url: '/ready' })).body), { status: 'ok', monitors: 0, checker: 'running', notify: 'disabled', alertHook: 'disabled' });
   assert.equal(JSON.parse((await app.inject({ url: '/v1/info' })).body).service, 'atc-status');
   assert.equal((await app.inject({ url: '/v1/monitors' })).statusCode, 401);
   assert.equal((await app.inject({ method: 'PUT', url: '/v1/monitors/x', headers: bearer(READ_KEY), payload: { url: 'https://x.example.com' } })).statusCode, 403);

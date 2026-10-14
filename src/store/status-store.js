@@ -32,6 +32,14 @@ export class StatusStore {
       closeIncident: raw.prepare('UPDATE incidents SET closed_at = ? WHERE id = ? AND closed_at IS NULL'),
       notifyError: raw.prepare('UPDATE incidents SET notify_error = ? WHERE id = ?'),
       pruneIncidents: raw.prepare('DELETE FROM incidents WHERE closed_at IS NOT NULL AND closed_at < ?'),
+      alert: raw.prepare('SELECT * FROM alerts WHERE id = ?'),
+      alertRecent: raw.prepare('SELECT * FROM alerts WHERE type = ? AND dedupe_key = ? AND last_at >= ? ORDER BY last_at DESC LIMIT 1'),
+      alertInsert: raw.prepare('INSERT INTO alerts (id, type, dedupe_key, severity, title, message, data, source, count, first_at, last_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 1, ?, ?)'),
+      alertBump: raw.prepare('UPDATE alerts SET count = count + 1, last_at = ?, message = ?, data = ? WHERE id = ?'),
+      alertAck: raw.prepare('UPDATE alerts SET acked_at = ?, acked_by = ? WHERE id = ? AND acked_at IS NULL'),
+      alertNotify: raw.prepare('UPDATE alerts SET notify_error = ? WHERE id = ?'),
+      alertOpen: raw.prepare('SELECT COUNT(*) AS n, SUM(CASE WHEN severity = \'critical\' THEN 1 ELSE 0 END) AS critical FROM alerts WHERE acked_at IS NULL'),
+      alertPrune: raw.prepare('DELETE FROM alerts WHERE acked_at IS NOT NULL AND acked_at < ?'),
       since: raw.prepare('SELECT COUNT(*) AS n FROM incidents WHERE opened_at >= ?'),
     };
   }
@@ -98,6 +106,35 @@ export class StatusStore {
   setNotifyError(id, error) { this.stmt.notifyError.run(error ? error.slice(0, 500) : null, id); }
   /** @param {number} cutoff */
   pruneIncidents(cutoff) { return Number(this.stmt.pruneIncidents.run(cutoff).changes); }
+  /** @param {string} id @returns {import('../types.js').AlertRow|undefined} */
+  alert(id) { return /** @type {any} */ (this.stmt.alert.get(id)); }
+  /** Newest alert of this type and key that is still inside the dedupe window. @param {string} type @param {string} key @param {number} since @returns {import('../types.js').AlertRow|undefined} */
+  alertRecent(type, key, since) { return /** @type {any} */ (this.stmt.alertRecent.get(type, key, since)); }
+  /** @param {{ id: string, type: string, key: string, severity: string, title: string, message: string, data: string, source: string, at: number }} a */
+  alertInsert(a) { this.stmt.alertInsert.run(a.id, a.type, a.key, a.severity, a.title, a.message, a.data, a.source, a.at, a.at); }
+  /** @param {string} id @param {number} at @param {string} message @param {string} data */
+  alertBump(id, at, message, data) { this.stmt.alertBump.run(at, message, data, id); }
+  /** @param {string} id @param {number} at @param {string} by */
+  alertAck(id, at, by) { return Number(this.stmt.alertAck.run(at, by, id).changes) === 1; }
+  /** @param {string} id @param {string|null} error */
+  alertNotifyError(id, error) { this.stmt.alertNotify.run(error ? error.slice(0, 500) : null, id); }
+  alertCounts() { const r = this.stmt.alertOpen.get(); return { open: Number(r?.n ?? 0), critical: Number(r?.critical ?? 0) }; }
+  /** @param {number} cutoff */
+  alertsPrune(cutoff) { return Number(this.stmt.alertPrune.run(cutoff).changes); }
+  /**
+   * Newest first, keyset paged on (last_at, id).
+   * @param {{ state?: 'open'|'acked', before?: { at: number, id: string }, limit: number }} q
+   * @returns {import('../types.js').AlertRow[]}
+   */
+  alerts(q) {
+    /** @type {string[]} */ const where = [];
+    /** @type {(string|number)[]} */ const args = [];
+    if (q.state === 'open') where.push('acked_at IS NULL');
+    if (q.state === 'acked') where.push('acked_at IS NOT NULL');
+    if (q.before) { where.push('(last_at < ? OR (last_at = ? AND id < ?))'); args.push(q.before.at, q.before.at, q.before.id); }
+    return /** @type {any} */ (this.raw.prepare(`SELECT * FROM alerts ${where.length ? `WHERE ${where.join(' AND ')}` : ''} ORDER BY last_at DESC, id DESC LIMIT ?`).all(...args, q.limit));
+  }
+
   /** @param {number} since */
   incidentsSince(since) { return Number(this.stmt.since.get(since)?.n ?? 0); }
 

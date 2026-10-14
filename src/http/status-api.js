@@ -26,12 +26,14 @@ export class StatusApi {
    * @param {object} deps
    * @param {Config} deps.config
    * @param {import('../domain/status-service.js').StatusService} deps.service
+   * @param {import('../domain/alert-service.js').AlertService} deps.alerts
    * @param {import('../db.js').Database} deps.db
    * @param {string} deps.version
    * @param {import('../types.js').Logger} [deps.logger]
    * @param {import('@atc-web/atc-service-core/audit').AuditClient} [deps.audit]
    */
-  constructor({ config, audit, service, db, version, logger }) {
+  constructor({ config, audit, service, alerts, db, version, logger }) {
+    this.alerts = alerts;
     this.config = config;
     this.audit = audit;
     this.service = service;
@@ -64,14 +66,26 @@ export class StatusApi {
     });
     registerProbes(app, () => this.db.ping(), {
       cacheMs: StatusApi.READY_CACHE_MS,
-      extra: () => ({ monitors: this.service.store.count(), checker: this.service.stopping.signal.aborted ? 'stopped' : 'running', notify: config.notify ? 'enabled' : 'disabled' }),
+      extra: () => ({ monitors: this.service.store.count(), checker: this.service.stopping.signal.aborted ? 'stopped' : 'running', notify: config.notify ? 'enabled' : 'disabled', alertHook: config.alertHookSecret ? 'enabled' : 'disabled' }),
     });
     registerOpenApi(app, new URL('../../openapi.yaml', import.meta.url));
     registerInfo(app, { service: 'atc-status', version: this.version, capabilities: ['http-checks', 'incidents', 'email-alerts', 'public-status-page', 'seeded-monitors', 'ssrf-guard'], schemaVersion: this.db.schemaVersion });
     this.#registerPublic(app);
+    await app.register((hooks) => this.#registerHooks(hooks));
     await app.register((api) => this.#registerV1(api), { prefix: '/v1' });
     await app.register((ops) => this.#registerMetrics(ops));
     return app;
+  }
+
+  /** The alert hook takes the raw body: webhook-out signed exactly those bytes. @param {FastifyInstance} hooks */
+  async #registerHooks(hooks) {
+    hooks.removeAllContentTypeParsers();
+    hooks.addContentTypeParser('*', { parseAs: 'string' }, (_request, body, done) => done(null, body));
+    hooks.post('/v1/hooks/webhook-out', async (request, reply) => {
+      const raw = typeof request.body === 'string' ? request.body : '';
+      const r = await this.alerts.receive(raw, /** @type {string|undefined} */ (request.headers['x-webhook-signature']));
+      return reply.code(202).send({ received: true, ...r });
+    });
   }
 
   /** @param {FastifyInstance} app */
@@ -150,6 +164,18 @@ export class StatusApi {
       return { incident: Views.incident(i, s.now()) };
     });
 
+    api.get('/alerts', { ...read, schema: { querystring: Schemas.alertsQuery } }, async (request) => {
+      const q = /** @type {{ state?: 'open'|'acked', limit?: string, cursor?: string }} */ (request.query);
+      const limit = q.limit ? Number(q.limit) : 50;
+      const [at, id] = q.cursor ? q.cursor.split('~') : [];
+      const rows = s.store.alerts({ state: q.state, before: q.cursor ? { at: Number(at), id } : undefined, limit: limit + 1 });
+      const page = rows.slice(0, limit);
+      const last = page.at(-1);
+      return { items: page.map(Views.alert), nextCursor: rows.length > limit && last ? `${last.last_at}~${last.id}` : null };
+    });
+
+    api.post('/alerts/:id/ack', { config: { audit: AuditClient.route('atc-status.alert.ack', (r) => ({ type: 'alert', id: mid(r) })) }, ...admin, schema: { params: Schemas.alertParams } }, async (request) => ({ alert: Views.alert(this.alerts.ack(mid(request), request.apiKey.id)) }));
+
     api.get('/stats', read, async () => s.stats());
   }
 
@@ -172,6 +198,10 @@ export class StatusApi {
         '# TYPE status_incident_open gauge',
         ...ms.map((m) => `status_incident_open{monitor="${label(m.id)}"} ${s.store.openOf(m.id) ? 1 : 0}`),
         ...AuditMetrics.lines(this.audit),
+        '# HELP status_alerts_open Alerts that are not acknowledged yet, by severity.',
+        '# TYPE status_alerts_open gauge',
+        `status_alerts_open{severity="critical"} ${s.store.alertCounts().critical}`,
+        `status_alerts_open{severity="warning"} ${s.store.alertCounts().open - s.store.alertCounts().critical}`,
         '# HELP status_process_uptime_seconds Process uptime.',
         '# TYPE status_process_uptime_seconds gauge',
         `status_process_uptime_seconds ${process.uptime().toFixed(0)}`,

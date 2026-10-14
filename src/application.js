@@ -4,6 +4,7 @@ import { Lifecycle } from '@atc-web/atc-service-core/lifecycle';
 import { readServiceVersion } from '@atc-web/atc-service-core/fastify';
 import { Config } from './config.js';
 import { Database } from './db.js';
+import { AlertService } from './domain/alert-service.js';
 import { StatusService } from './domain/status-service.js';
 import { StatusApi } from './http/status-api.js';
 import { Checker } from './net/checker.js';
@@ -26,6 +27,7 @@ export class Application {
       checker: new Checker({ guard: new NetGuard(config.target) }),
       notifier: config.notify ? new Notifier(config.notify) : null,
     });
+    this.alerts = new AlertService({ config, store: this.store, notifier: config.notify ? new Notifier(config.notify) : null });
     /** @type {import('fastify').FastifyInstance|null} */
     this.app = null;
     /** @type {NodeJS.Timeout[]} */
@@ -49,9 +51,10 @@ export class Application {
 
   async start() {
     const { config } = this;
-    const app = await new StatusApi({ config, audit: this.audit, service: this.service, db: this.db, version: this.version }).build();
+    const app = await new StatusApi({ config, audit: this.audit, service: this.service, alerts: this.alerts, db: this.db, version: this.version }).build();
     this.app = app;
     this.service.logger = app.log;
+    this.alerts.logger = app.log;
     this.service.seed();
     const maintain = () => {
       try {

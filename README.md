@@ -35,9 +35,12 @@ Tests and type check: `npm test`, `npm run typecheck`.
 | POST | `/v1/monitors/:id/check` | admin | Check now |
 | GET | `/v1/monitors/:id/checks` | read | Check history, cursor paging |
 | GET | `/v1/incidents`, `/v1/incidents/:id` | read | Incidents by monitor and state |
+| POST | `/v1/hooks/webhook-out` | signature | atc-webhook-out delivery; `ops.*` events become alerts |
+| GET | `/v1/alerts` | read | Operational alerts by state |
+| POST | `/v1/alerts/:id/ack` | admin | Acknowledge an alert |
 | GET | `/v1/stats` | read | Monitors by state, open and recent incidents |
 
-Errors: `{ "error": { "code", "message" } }` — `VALIDATION_FAILED`, `INVALID_ARGUMENT`, `TARGET_NOT_ALLOWED` (400), `FORBIDDEN` (403), `MONITOR_NOT_FOUND`, `INCIDENT_NOT_FOUND` (404), `INVALID_STATE`, `LIMIT_EXCEEDED` (409), `RATE_LIMITED` (429). Full contract: [openapi.yaml](openapi.yaml).
+Errors: `{ "error": { "code", "message" } }` — `VALIDATION_FAILED`, `INVALID_ARGUMENT`, `TARGET_NOT_ALLOWED` (400), `FORBIDDEN` (403), `MONITOR_NOT_FOUND`, `INCIDENT_NOT_FOUND`, `ALERT_NOT_FOUND`, `HOOK_DISABLED` (404), `INVALID_SIGNATURE` (401), `INVALID_STATE`, `LIMIT_EXCEEDED` (409), `RATE_LIMITED` (429). Full contract: [openapi.yaml](openapi.yaml).
 
 ## Examples
 
@@ -55,6 +58,7 @@ Monitors, seeded monitors, incidents, alerts, the status page and the gateway ro
 | `CHECK_RETENTION_DAYS`, `INCIDENT_RETENTION_DAYS` | `14`, `365` | |
 | `STATUS_PAGE_TITLE`, `STATUS_PAGE_CACHE_SEC` | `Service status`, `15` | Public page |
 | `NOTIFY_URL`, `NOTIFY_API_KEY`, `ALERT_EMAILS`, `ALERT_APP_NAME`, `NOTIFY_TIMEOUT_MS` | empty, empty, empty, `atc-web`, `10000` | Alerts (URL and key both or neither; recipients required with them) |
+| `ALERT_HOOK_SECRET`, `ALERT_DEDUPE_MIN` | empty, `15` | Signing secret (>= 32 chars) of the webhook-out subscription that delivers `ops.*` events; empty disables the hook. Repeats of one alert inside the window are counted, not mailed again |
 | `DB_PATH`, `DB_BACKUP_DIR`, `BODY_LIMIT`, `RATE_LIMIT_MAX` | `./data/status.db`, –, `16384`, `600` | |
 | `TRUST_PROXY`, `TLS_CERT_PATH`, `TLS_KEY_PATH`, `LOG_LEVEL` | | As in every service |
 | `AUDIT_URL`, `AUDIT_API_KEY` | empty | Forward audit events (both or neither) |
@@ -87,7 +91,7 @@ test/                       node:test suites
 
 ## Audit events
 
-With `AUDIT_URL` and `AUDIT_API_KEY` set, `atc-status.monitor.upsert` (meta: created, settings) and `atc-status.monitor.delete` are forwarded with `success`, or `denied` on 403. Details: [examples/audit-events.md](examples/audit-events.md).
+With `AUDIT_URL` and `AUDIT_API_KEY` set, `atc-status.monitor.upsert` (meta: created, settings) and `atc-status.monitor.delete` and `atc-status.alert.ack` are forwarded with `success`, or `denied` on 403. Details: [examples/audit-events.md](examples/audit-events.md).
 
 ## Scaling model
 

@@ -3,6 +3,7 @@ import { NetGuard } from '@atc-web/atc-service-core/http';
 import { readServiceVersion } from '@atc-web/atc-service-core/fastify';
 import { Config } from '../src/config.js';
 import { Database } from '../src/db.js';
+import { AlertService } from '../src/domain/alert-service.js';
 import { StatusService } from '../src/domain/status-service.js';
 import { StatusApi } from '../src/http/status-api.js';
 import { Checker } from '../src/net/checker.js';
@@ -45,7 +46,8 @@ export function testService(overrides, o = {}) {
   const store = new StatusStore(db);
   const checker = o.checker ?? scriptedChecker();
   const service = new StatusService({ config, store, checker, notifier: o.notifier ?? null, now: o.now });
-  return { config, db, store, service, checker };
+  const alerts = new AlertService({ config, store, notifier: o.notifier ?? null, now: o.now });
+  return { config, db, store, service, alerts, checker };
 }
 
 /** @param {Record<string, string>} [overrides] @param {object} [deps] @param {{ now?: () => number, checker?: any, notifier?: any }} [o] */

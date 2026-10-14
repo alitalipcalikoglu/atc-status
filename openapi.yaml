@@ -22,6 +22,7 @@ security:
 tags:
   - name: monitors
   - name: incidents
+  - name: alerts
   - name: public
   - name: stats
   - name: ops
@@ -57,12 +58,13 @@ paths:
             application/json:
               schema:
                 type: object
-                required: [status, monitors, checker, notify]
+                required: [status, monitors, checker, notify, alertHook]
                 properties:
                   status: { type: string, enum: [ok] }
                   monitors: { type: integer }
                   checker: { type: string, enum: [running, stopped] }
                   notify: { type: string, enum: [enabled, disabled] }
+                  alertHook: { type: string, enum: [enabled, disabled] }
         "503": { description: The cached readiness check last failed., content: { application/json: { schema: { type: object, required: [status, error], properties: { status: { type: string, enum: [unavailable] }, error: { type: string } } } } } }
   /v1/info:
     get:
@@ -288,6 +290,58 @@ paths:
         "403": { $ref: "#/components/responses/Forbidden" }
         "404": { $ref: "#/components/responses/NotFound" }
 
+  /v1/hooks/webhook-out:
+    post:
+      operationId: atc-status.hooks.webhook-out
+      summary: Receive a signed webhook-out delivery; ops.* events become alerts (no API key, HMAC signature)
+      tags: [alerts]
+      security: []
+      parameters:
+        - { name: x-webhook-signature, in: header, required: true, schema: { type: string } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { type: object, required: [type], properties: { id: { type: string }, type: { type: string }, createdAt: { type: string }, data: { type: object } } }
+      responses:
+        "202":
+          description: Accepted.
+          content: { application/json: { schema: { type: object, required: [outcome, id], properties: { outcome: { type: string, enum: [alerted, repeated, ignored] }, id: { type: [string, "null"] } } } } }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { description: The signature does not match or the timestamp is stale. }
+        "404": { description: The hook is disabled (no ALERT_HOOK_SECRET). }
+
+  /v1/alerts:
+    get:
+      operationId: atc-status.alerts.list
+      summary: Operational alerts, newest first
+      tags: [alerts]
+      parameters:
+        - { name: state, in: query, schema: { type: string, enum: [open, acked] } }
+        - { name: limit, in: query, schema: { type: string, pattern: "^([1-9]|[1-9][0-9]|100)$" } }
+        - { name: cursor, in: query, schema: { type: string } }
+      responses:
+        "200":
+          description: One page.
+          content:
+            application/json:
+              schema: { type: object, required: [items, nextCursor], properties: { items: { type: array, items: { $ref: "#/components/schemas/Alert" } }, nextCursor: { type: [string, "null"] } } }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+
+  /v1/alerts/{id}/ack:
+    parameters: [{ name: id, in: path, required: true, schema: { type: string, pattern: "^alr_[0-9a-z]{6,12}[0-9a-f]{16}$" } }]
+    post:
+      operationId: atc-status.alerts.ack
+      summary: Acknowledge an alert (admin)
+      tags: [alerts]
+      responses:
+        "200": { description: The acknowledged alert., content: { application/json: { schema: { type: object, required: [alert], properties: { alert: { $ref: "#/components/schemas/Alert" } } } } } }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+
   /v1/stats:
     get:
       operationId: atc-status.stats.get
@@ -300,7 +354,7 @@ paths:
             application/json:
               schema:
                 type: object
-                required: [monitors, up, down, degraded, unknown, paused, openIncidents, incidents24h, notify]
+                required: [monitors, up, down, degraded, unknown, paused, openIncidents, incidents24h, openAlerts, criticalAlerts, notify]
                 properties:
                   monitors: { type: integer }
                   up: { type: integer }
@@ -310,6 +364,8 @@ paths:
                   paused: { type: integer }
                   openIncidents: { type: integer }
                   incidents24h: { type: integer }
+                  openAlerts: { type: integer }
+                  criticalAlerts: { type: integer }
                   notify: { type: boolean }
         "401": { $ref: "#/components/responses/Unauthorized" }
         "403": { $ref: "#/components/responses/Forbidden" }
@@ -378,6 +434,24 @@ components:
         status: { type: [integer, "null"] }
         latencyMs: { type: integer }
         error: { type: [string, "null"] }
+    Alert:
+      type: object
+      properties:
+        id: { type: string }
+        type: { type: string }
+        key: { type: string }
+        severity: { type: string, enum: [info, warning, critical] }
+        title: { type: string }
+        message: { type: string }
+        data: { type: object }
+        source: { type: [string, "null"] }
+        count: { type: integer }
+        firstAt: { type: string, format: date-time }
+        lastAt: { type: string, format: date-time }
+        state: { type: string, enum: [open, acked] }
+        ackedAt: { type: [string, "null"], format: date-time }
+        ackedBy: { type: [string, "null"] }
+        notifyError: { type: [string, "null"] }
     Incident:
       type: object
       properties:

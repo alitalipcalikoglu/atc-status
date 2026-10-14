@@ -19,6 +19,13 @@ export class Schemas {
     },
   };
 
+  static alertId = { type: 'string', pattern: '^alr_[0-9a-z]{6,12}[0-9a-f]{16}$' };
+  static alertParams = { type: 'object', properties: { id: Schemas.alertId }, required: ['id'] };
+  static alertsQuery = {
+    type: 'object', additionalProperties: false,
+    properties: { state: { type: 'string', enum: ['open', 'acked'] }, limit: { type: 'string', pattern: '^([1-9]|[1-9][0-9]|100)$' }, cursor: { type: 'string', pattern: '^[0-9]{1,15}~alr_[0-9a-z]{6,12}[0-9a-f]{16}$' } },
+  };
+
   static monitorParams = { type: 'object', properties: { id: Schemas.monitorId }, required: ['id'] };
   static incidentParams = { type: 'object', properties: { id: Schemas.incidentId }, required: ['id'] };
   static checksQuery = { type: 'object', additionalProperties: false, properties: { limit: { type: 'string', pattern: '^([1-9]|[1-9][0-9]|1[0-9][0-9]|200)$' }, cursor: { type: 'string', pattern: '^[0-9]{1,15}$' } } };

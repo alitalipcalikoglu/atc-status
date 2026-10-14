@@ -28,6 +28,8 @@ export class Config {
     this.target = Object.freeze({ ...v.target });
     this.seeds = Object.freeze(v.seeds.map((s) => Object.freeze({ ...s })));
     this.notify = v.notify;
+    this.alertHookSecret = v.alertHookSecret;
+    this.alertDedupeMin = v.alertDedupeMin;
     this.limits = Object.freeze({ ...v.limits });
     this.page = Object.freeze({ ...v.page });
     Object.freeze(this);
@@ -54,6 +56,8 @@ export class Config {
       target: parseTarget(r),
       seeds: Config.#parseSeeds(r.optional('MONITOR_SEEDS')),
       notify: Config.#parseNotify(r),
+      alertHookSecret: Config.#parseHookSecret(r.optional('ALERT_HOOK_SECRET')),
+      alertDedupeMin: r.integer('ALERT_DEDUPE_MIN', 15, { min: 1, max: 1_440 }),
       limits: {
         maxMonitors: r.integer('MAX_MONITORS', 500, { min: 1 }),
         maxConcurrent: r.integer('MAX_CONCURRENT', 8, { min: 1, max: 100 }),
@@ -104,6 +108,13 @@ export class Config {
     if (to.length > 10) throw new ConfigError('ALERT_EMAILS may list at most 10 addresses (atc-notify limit per message); use a distribution list');
     for (const e of to) if (!Config.EMAIL_PATTERN.test(e)) throw new ConfigError(`ALERT_EMAILS entry "${e}" is not an e-mail address`);
     return { url, apiKey, to, appName: r.optional('ALERT_APP_NAME') || 'atc-web', timeoutMs: r.integer('NOTIFY_TIMEOUT_MS', 10_000, { min: 500 }) };
+  }
+
+  /** @param {string} raw */
+  static #parseHookSecret(raw) {
+    if (!raw) return null;
+    if (raw.length < Config.MIN_SECRET_LENGTH) throw new ConfigError(`ALERT_HOOK_SECRET must be at least ${Config.MIN_SECRET_LENGTH} characters`);
+    return raw;
   }
 
   /** `id:secret:role`, role `read` or `admin`. @param {string} raw @returns {ApiKey[]} */

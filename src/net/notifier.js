@@ -49,6 +49,37 @@ export class Notifier {
     }
   }
 
+  /** @param {import('../types.js').AlertRow} alert */
+  async alert(alert) {
+    const res = await this.fetch(`${this.target.url}/v1/messages`, {
+      method: 'POST',
+      headers: { authorization: `Bearer ${this.target.apiKey}`, 'content-type': 'application/json' },
+      redirect: 'error',
+      signal: AbortSignal.timeout(this.target.timeoutMs),
+      body: JSON.stringify({
+        channel: 'email',
+        template: 'generic',
+        to: this.target.to,
+        idempotencyKey: `atc-status:${alert.id}`,
+        data: {
+          locale: 'en',
+          appName: this.target.appName,
+          subject: `${alert.severity === 'critical' ? 'CRITICAL' : 'ALERT'}: ${alert.title}`.slice(0, 200),
+          title: alert.title.slice(0, 200),
+          paragraphs: [alert.message.slice(0, 1_900), `Type ${alert.type}, from ${alert.source}. Acknowledge it in the console to clear it.`],
+        },
+      }),
+    });
+    if (!res.ok) throw new Error(await Notifier.#reason(res));
+  }
+
+  /** @param {Response} res */
+  static async #reason(res) {
+    const text = await res.text().catch(() => '');
+    try { const j = JSON.parse(text); if (j?.error?.message) return `atc-notify: ${j.error.message}`; } catch { /* not JSON */ }
+    return `atc-notify responded ${res.status}`;
+  }
+
   /** @param {number} ms */
   static duration(ms) {
     const s = Math.max(0, Math.round(ms / 1000));

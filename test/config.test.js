@@ -33,3 +33,10 @@ test('Config: ALERT_EMAILS is capped at the notify recipient limit', () => {
   assert.throws(() => Config.fromEnv(testEnv({ NOTIFY_URL: 'http://n', NOTIFY_API_KEY: 'n'.repeat(40), ALERT_EMAILS: many })), (e) => e instanceof ConfigError && /at most 10/.test(e.message));
   assert.equal(Config.fromEnv(testEnv({ NOTIFY_URL: 'http://n', NOTIFY_API_KEY: 'n'.repeat(40), ALERT_EMAILS: many.split(',').slice(0, 10).join(',') })).notify?.to.length, 10);
 });
+
+test('Config: ALERT_HOOK_SECRET needs 32 characters; empty disables the hook', () => {
+  assert.equal(Config.fromEnv(testEnv()).alertHookSecret, null);
+  assert.equal(Config.fromEnv(testEnv({ ALERT_HOOK_SECRET: 'h'.repeat(40) })).alertHookSecret, 'h'.repeat(40));
+  assert.throws(() => Config.fromEnv(testEnv({ ALERT_HOOK_SECRET: 'short' })), ConfigError);
+  assert.equal(Config.fromEnv(testEnv()).alertDedupeMin, 15);
+});

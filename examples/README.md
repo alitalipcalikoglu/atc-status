@@ -8,6 +8,7 @@ Scenario-driven walkthroughs of every feature. Requests to `/v1/*` need `Authori
 | [Seeded monitors](seeded-monitors.md) | `/health` and `/ready` of every service from `MONITOR_SEEDS` |
 | [Incidents](incidents.md) | When incidents open and close, browsing them |
 | [Alerts](alerts.md) | E-mails through atc-notify when an incident opens and closes |
+| [Operational alerts](operational-alerts.md) | `ops.*` events from webhook-out become alerts: dedupe, e-mail, acknowledge |
 | [Public status page](status-page.md) | `/status` and `/status/summary.json`, what is shown, serving it through the gateway |
 | [Outbound safety](ssrf-guard.md) | The SSRF guard for monitors created through the API |
 | [API keys and roles](keys-and-roles.md) | read and admin |

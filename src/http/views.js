@@ -33,4 +33,12 @@ export class Views {
       durationSec: Math.round(((i.closed_at ?? now) - i.opened_at) / 1000), cause: i.cause, lastError: i.last_error, failures: Number(i.failures), notifyError: i.notify_error,
     };
   }
+
+  /** @param {import('../types.js').AlertRow} a */
+  static alert(a) {
+    return {
+      id: a.id, type: a.type, key: a.dedupe_key, severity: a.severity, title: a.title, message: a.message, data: JSON.parse(a.data), source: a.source, count: Number(a.count),
+      firstAt: Views.iso(a.first_at), lastAt: Views.iso(a.last_at), state: a.acked_at === null ? 'open' : 'acked', ackedAt: Views.iso(a.acked_at), ackedBy: a.acked_by, notifyError: a.notify_error,
+    };
+  }
 }

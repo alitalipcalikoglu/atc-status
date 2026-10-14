@@ -52,6 +52,8 @@
  * @property {{ allowHttp: boolean, allowPrivate: boolean, allowedHosts: string[] }} target
  * @property {Seed[]} seeds
  * @property {NotifyTarget|null} notify
+ * @property {string|null} alertHookSecret  Signing secret of the webhook-out subscription that delivers ops.* events; null = hook disabled.
+ * @property {number} alertDedupeMin  Repeats of the same alert inside this window raise a counter instead of another e-mail.
  * @property {Limits} limits
  * @property {{ title: string, cacheSec: number }} page
  */
@@ -102,6 +104,24 @@
  * @property {string} cause
  * @property {string|null} last_error
  * @property {number} failures
+ * @property {string|null} notify_error
+ */
+
+/**
+ * @typedef {object} AlertRow
+ * @property {string} id
+ * @property {string} type
+ * @property {string} dedupe_key
+ * @property {'warning'|'critical'} severity
+ * @property {string} title
+ * @property {string} message
+ * @property {string} data       JSON.
+ * @property {string} source
+ * @property {number} count
+ * @property {number} first_at
+ * @property {number} last_at
+ * @property {number|null} acked_at
+ * @property {string|null} acked_by
  * @property {string|null} notify_error
  */
 

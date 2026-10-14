@@ -153,6 +153,7 @@ export class StatusService {
     return {
       checks: this.store.pruneChecks(now - this.config.limits.checkRetentionDays * StatusService.DAY),
       incidents: this.store.pruneIncidents(now - this.config.limits.incidentRetentionDays * StatusService.DAY),
+      alerts: this.store.alertsPrune(now - this.config.limits.incidentRetentionDays * StatusService.DAY),
     };
   }
 
@@ -180,7 +181,7 @@ export class StatusService {
     /** @type {Record<string, number>} */
     const by = { up: 0, down: 0, degraded: 0, unknown: 0, paused: 0 };
     for (const m of ms) by[this.stateOf(m)]++;
-    return { monitors: ms.length, ...by, openIncidents: this.store.openAll().length, incidents24h: this.store.incidentsSince(this.now() - StatusService.DAY), notify: this.notifier !== null };
+    return { monitors: ms.length, ...by, openIncidents: this.store.openAll().length, incidents24h: this.store.incidentsSince(this.now() - StatusService.DAY), openAlerts: this.store.alertCounts().open, criticalAlerts: this.store.alertCounts().critical, notify: this.notifier !== null };
   }
 
   /**

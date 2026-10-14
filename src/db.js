@@ -55,6 +55,27 @@ export class Database extends CoreDatabase {
     );
     CREATE UNIQUE INDEX incidents_open ON incidents (monitor) WHERE closed_at IS NULL;
     CREATE INDEX incidents_opened ON incidents (opened_at DESC);
+
+    -- Alerts raised by platform events (ops.*) that reach the alert hub through webhook-out. One row
+    -- per (type, key) while it is open; repeats inside the dedupe window only raise the count.
+    CREATE TABLE alerts (
+      id           TEXT PRIMARY KEY,
+      type         TEXT NOT NULL,
+      dedupe_key   TEXT NOT NULL,
+      severity     TEXT NOT NULL CHECK (severity IN ('warning', 'critical')),
+      title        TEXT NOT NULL,
+      message      TEXT NOT NULL,
+      data         TEXT NOT NULL,
+      source       TEXT NOT NULL,
+      count        INTEGER NOT NULL DEFAULT 1,
+      first_at     INTEGER NOT NULL,
+      last_at      INTEGER NOT NULL,
+      acked_at     INTEGER,
+      acked_by     TEXT,
+      notify_error TEXT
+    );
+    CREATE INDEX alerts_open ON alerts (acked_at, last_at DESC);
+    CREATE INDEX alerts_key ON alerts (type, dedupe_key, last_at DESC);
     `,
   ];
 }
