@@ -31,6 +31,7 @@ export class Config {
     this.seeds = Object.freeze(v.seeds.map((s) => Object.freeze({ ...s })));
     this.notify = v.notify;
     this.alertHookSecret = v.alertHookSecret;
+    this.heartbeat = v.heartbeat;
     this.alertDedupeMin = v.alertDedupeMin;
     this.limits = Object.freeze({ ...v.limits });
     this.page = Object.freeze({ ...v.page });
@@ -60,6 +61,7 @@ export class Config {
       seeds: Config.#parseSeeds(r.optional('MONITOR_SEEDS')),
       notify: Config.#parseNotify(r),
       alertHookSecret: Config.#parseHookSecret(r.optional('ALERT_HOOK_SECRET')),
+      heartbeat: Config.#parseHeartbeat(r),
       alertDedupeMin: r.integer('ALERT_DEDUPE_MIN', 15, { min: 1, max: 1_440 }),
       limits: {
         maxMonitors: r.integer('MAX_MONITORS', 500, { min: 1 }),
@@ -96,6 +98,14 @@ export class Config {
       out.push({ id, url });
     }
     return out;
+  }
+
+  /** `HEARTBEAT_URL`: pinged every `HEARTBEAT_INTERVAL_SEC` as a dead man's switch; empty = off. @param {EnvReader} r */
+  static #parseHeartbeat(r) {
+    const url = r.optional('HEARTBEAT_URL');
+    if (!url) return null;
+    if (!/^https?:\/\/[^\s]+$/.test(url)) throw new ConfigError('HEARTBEAT_URL must be an absolute http(s) URL');
+    return { url, intervalSec: r.integer('HEARTBEAT_INTERVAL_SEC', 60, { min: 10, max: 86_400 }) };
   }
 
   /** @param {EnvReader} r */

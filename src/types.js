@@ -53,6 +53,7 @@
  * @property {{ allowHttp: boolean, allowPrivate: boolean, allowedHosts: string[] }} target
  * @property {Seed[]} seeds
  * @property {NotifyTarget|null} notify
+ * @property {{ url: string, intervalSec: number }|null} heartbeat  Dead man's switch: this URL is pinged on an interval; null = off.
  * @property {string|null} alertHookSecret  Signing secret of the webhook-out subscription that delivers ops.* events; null = hook disabled.
  * @property {number} alertDedupeMin  Repeats of the same alert inside this window raise a counter instead of another e-mail.
  * @property {Limits} limits
@@ -64,8 +65,14 @@
  * @property {string} id
  * @property {string} name
  * @property {string} description
- * @property {string} url
+ * @property {'http'|'tcp'|'tls'|'heartbeat'} kind
+ * @property {string} url              http: the URL; tcp and tls: https://host:port; heartbeat: empty.
  * @property {'GET'|'HEAD'} method
+ * @property {string|null} expect_text  http only: text the first KiB of the body must contain.
+ * @property {number|null} warn_days    tls only: fail when the certificate expires within this many days.
+ * @property {number|null} grace_sec    heartbeat only: how late a ping may be after its interval.
+ * @property {string|null} ping_hash    heartbeat only: SHA-256 of the ping token.
+ * @property {number|null} last_ping_at heartbeat only.
  * @property {number} interval_sec
  * @property {number} timeout_ms
  * @property {string} expect_status   JSON array of accepted status codes.

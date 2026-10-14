@@ -1,4 +1,4 @@
-import { randomBytes } from 'node:crypto';
+import { createHash, randomBytes, timingSafeEqual } from 'node:crypto';
 import { StatusError } from './errors.js';
 
 /** @typedef {import('../types.js').MonitorRow} MonitorRow */
@@ -12,7 +12,7 @@ import { StatusError } from './errors.js';
  */
 export class StatusService {
   static ID_PATTERN = /^[a-z0-9][a-z0-9-]{0,63}$/;
-  static DEFAULTS = Object.freeze({ description: '', method: 'GET', intervalSec: 60, timeoutMs: 5_000, expectStatus: [200], failThreshold: 2, public: false, paused: false });
+  static DEFAULTS = Object.freeze({ warnDays: 14, graceSec: 60, description: '', method: 'GET', intervalSec: 60, timeoutMs: 5_000, expectStatus: [200], failThreshold: 2, public: false, paused: false });
   static DAY = 86_400_000;
 
   /**
@@ -72,17 +72,28 @@ export class StatusService {
   }
 
   /**
-   * Create or change a monitor. Omitted fields keep their value (defaults on create). A seeded
-   * monitor's URL belongs to MONITOR_SEEDS and cannot be changed here.
+   * Create or change a monitor. Omitted fields keep their value (defaults on create). The kind is
+   * fixed when the monitor is created. A seeded monitor's URL belongs to MONITOR_SEEDS and cannot be changed here.
+   * Creating a heartbeat monitor (or `rotateToken`) returns the ping token once; only its hash is stored.
    * @param {string} id
-   * @param {{ name?: string, description?: string, url?: string, method?: 'GET'|'HEAD', intervalSec?: number, timeoutMs?: number, expectStatus?: number[], failThreshold?: number, public?: boolean, paused?: boolean }} body
+   * @param {{ kind?: 'http'|'tcp'|'tls'|'heartbeat', name?: string, description?: string, url?: string, method?: 'GET'|'HEAD', expectText?: string|null, warnDays?: number, graceSec?: number, rotateToken?: boolean, intervalSec?: number, timeoutMs?: number, expectStatus?: number[], failThreshold?: number, public?: boolean, paused?: boolean }} body
    * @param {string} by
-   * @returns {{ monitor: MonitorRow, created: boolean }}
+   * @returns {{ monitor: MonitorRow, created: boolean, pingToken: string|null }}
    */
   put(id, body, by) {
     if (!StatusService.ID_PATTERN.test(id)) throw new StatusError('INVALID_ARGUMENT', 'id must be lowercase letters, digits and dashes');
     const existing = this.store.monitor(id);
-    if (!existing && !body.url) throw new StatusError('INVALID_ARGUMENT', 'url is required for a new monitor');
+    const kind = existing?.kind ?? body.kind ?? 'http';
+    if (existing && body.kind !== undefined && body.kind !== existing.kind) throw new StatusError('INVALID_ARGUMENT', 'the kind of a monitor cannot be changed; create another monitor');
+    if (kind === 'heartbeat') {
+      if (body.url !== undefined || body.method !== undefined || body.expectText != null || body.warnDays !== undefined || body.expectStatus !== undefined) throw new StatusError('INVALID_ARGUMENT', 'a heartbeat monitor has no url, method, expectText, warnDays or expectStatus');
+    } else {
+      if (!existing && !body.url) throw new StatusError('INVALID_ARGUMENT', 'url is required for a new monitor');
+      if (body.graceSec !== undefined || body.rotateToken) throw new StatusError('INVALID_ARGUMENT', 'graceSec and rotateToken belong to heartbeat monitors');
+      if (body.expectText != null && kind !== 'http') throw new StatusError('INVALID_ARGUMENT', 'expectText belongs to http monitors');
+      if (body.warnDays !== undefined && kind !== 'tls') throw new StatusError('INVALID_ARGUMENT', 'warnDays belongs to tls monitors');
+      if (kind !== 'http' && (body.method !== undefined || body.expectStatus !== undefined)) throw new StatusError('INVALID_ARGUMENT', 'method and expectStatus belong to http monitors');
+    }
     if (!existing && this.store.count() >= this.config.limits.maxMonitors) throw new StatusError('LIMIT_EXCEEDED', `at most ${this.config.limits.maxMonitors} monitors`);
     if (existing?.origin === 'env' && body.url !== undefined && body.url !== existing.url) throw new StatusError('INVALID_ARGUMENT', 'the URL of a monitor from MONITOR_SEEDS is set by that variable');
     if (body.url !== undefined && existing?.origin !== 'env') {
@@ -92,30 +103,56 @@ export class StatusService {
     const now = this.now();
     const interval = body.intervalSec ?? existing?.interval_sec ?? d.intervalSec;
     const timeout = body.timeoutMs ?? existing?.timeout_ms ?? d.timeoutMs;
-    if (timeout > interval * 1000) throw new StatusError('INVALID_ARGUMENT', 'timeoutMs must not exceed the interval');
+    if (kind !== 'heartbeat' && timeout > interval * 1000) throw new StatusError('INVALID_ARGUMENT', 'timeoutMs must not exceed the interval');
     const paused = body.paused ?? (existing ? existing.paused === 1 : d.paused);
-    // Check soon after creating, unpausing or changing what or how often to check.
+    // Check soon after creating, unpausing or changing what or how often to check. A heartbeat is judged one interval after creation instead.
     const reschedule = !existing || (existing.paused === 1 && !paused) || (body.url !== undefined && body.url !== existing.url) || interval !== existing.interval_sec;
+    const token = kind === 'heartbeat' && (!existing || body.rotateToken) ? randomBytes(20).toString('hex') : null;
     /** @type {MonitorRow} */
     const m = /** @type {any} */ ({
       ...(existing ?? { origin: 'api', created_by: by, created_at: now }),
       id,
+      kind,
       name: body.name ?? existing?.name ?? id,
       description: body.description ?? existing?.description ?? d.description,
-      url: body.url ?? existing?.url,
+      url: kind === 'heartbeat' ? '' : body.url ?? existing?.url,
       method: body.method ?? existing?.method ?? d.method,
+      expect_text: body.expectText === undefined ? existing?.expect_text ?? null : body.expectText,
+      warn_days: kind === 'tls' ? body.warnDays ?? existing?.warn_days ?? d.warnDays : null,
+      grace_sec: kind === 'heartbeat' ? body.graceSec ?? existing?.grace_sec ?? d.graceSec : null,
+      ping_hash: token ? StatusService.hashToken(token) : existing?.ping_hash ?? null,
       interval_sec: interval,
       timeout_ms: timeout,
       expect_status: body.expectStatus ? JSON.stringify([...new Set(body.expectStatus)].sort((a, b) => a - b)) : existing?.expect_status ?? JSON.stringify(d.expectStatus),
       fail_threshold: body.failThreshold ?? existing?.fail_threshold ?? d.failThreshold,
       public: (body.public ?? (existing ? existing.public === 1 : d.public)) ? 1 : 0,
       paused: paused ? 1 : 0,
-      next_at: reschedule ? now : /** @type {MonitorRow} */ (existing).next_at,
+      next_at: reschedule ? (kind === 'heartbeat' ? now + (interval + (body.graceSec ?? d.graceSec)) * 1000 : now) : /** @type {MonitorRow} */ (existing).next_at,
       updated_at: now,
     });
+    if (m.expect_text !== null && m.method === 'HEAD') throw new StatusError('INVALID_ARGUMENT', 'expectText needs method GET: a HEAD response has no body');
     if (existing) this.store.update(m); else this.store.insert(m);
     this.pageCache = null;
-    return { monitor: this.get(id), created: !existing };
+    return { monitor: this.get(id), created: !existing, pingToken: token };
+  }
+
+  /** @param {string} token */
+  static hashToken(token) {
+    return createHash('sha256').update(token).digest('hex');
+  }
+
+  /**
+   * A heartbeat arrived. The token is the credential; an unknown monitor and a wrong token answer the same.
+   * A monitor with an open incident is checked at once, so it recovers on the ping and not at the next interval.
+   * @param {string} id @param {string} token
+   */
+  async ping(id, token) {
+    const m = this.store.monitor(id);
+    const given = Buffer.from(StatusService.hashToken(token));
+    const want = Buffer.from(m?.ping_hash ?? '0'.repeat(64));
+    if (!m || m.kind !== 'heartbeat' || m.paused === 1 || given.length !== want.length || !timingSafeEqual(given, want)) throw new StatusError('MONITOR_NOT_FOUND', 'no such heartbeat monitor');
+    this.store.ping(id, this.now());
+    if (this.store.openOf(id)) await this.#run(this.get(id));
   }
 
   /** @param {string} id */

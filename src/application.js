@@ -4,6 +4,7 @@ import { Lifecycle } from '@atc-web/atc-service-core/lifecycle';
 import { readServiceVersion } from '@atc-web/atc-service-core/fastify';
 import { Config } from './config.js';
 import { Database } from './db.js';
+import { OutboundHeartbeat } from './net/outbound-heartbeat.js';
 import { AlertService } from './domain/alert-service.js';
 import { StatusService } from './domain/status-service.js';
 import { StatusApi } from './http/status-api.js';
@@ -31,6 +32,7 @@ export class Application {
       publisher: this.publisher,
     });
     this.alerts = new AlertService({ config, store: this.store, notifier: config.notify ? new Notifier(config.notify) : null });
+    this.heartbeat = config.heartbeat ? new OutboundHeartbeat(config.heartbeat) : null;
     /** @type {import('fastify').FastifyInstance|null} */
     this.app = null;
     /** @type {NodeJS.Timeout[]} */
@@ -54,7 +56,7 @@ export class Application {
 
   async start() {
     const { config } = this;
-    const app = await new StatusApi({ config, audit: this.audit, publisher: this.publisher, service: this.service, alerts: this.alerts, db: this.db, version: this.version }).build();
+    const app = await new StatusApi({ config, audit: this.audit, publisher: this.publisher, heartbeat: this.heartbeat ?? undefined, service: this.service, alerts: this.alerts, db: this.db, version: this.version }).build();
     this.app = app;
     this.service.logger = app.log;
     this.alerts.logger = app.log;
@@ -70,7 +72,7 @@ export class Application {
       forceExitMs: 30_000,
       log: app.log,
       steps: [
-        () => { for (const t of this.timers) clearInterval(t); this.service.stopping.abort(); },
+        () => { for (const t of this.timers) clearInterval(t); this.heartbeat?.stop(); this.service.stopping.abort(); },
         () => this.app?.close(),
         () => this.service.idle(),
         () => this.publisher.close(),
@@ -81,11 +83,13 @@ export class Application {
     this.shutdown = shutdown;
     this.audit.logger = app.log;
     this.publisher.logger = app.log;
+    if (this.heartbeat) this.heartbeat.logger = app.log;
     this.audit.start();
     await app.listen({ port: config.port, host: config.host });
     app.log.info({ tls: config.tls !== null, monitors: this.store.count(), notify: config.notify !== null }, config.tls ? 'serving HTTPS' : 'serving plain HTTP, terminate TLS at a reverse proxy');
     if (process.send) process.send('ready'); // PM2 wait_ready
     this.timers.push(setInterval(() => { this.service.runDue(); }, config.limits.tickMs), setInterval(maintain, Application.MAINTAIN_MS));
     for (const t of this.timers) t.unref();
+    this.heartbeat?.start();
   }
 }

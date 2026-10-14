@@ -5,6 +5,7 @@ Scenario-driven walkthroughs of every feature. Requests to `/v1/*` need `Authori
 | Example | Shows |
 |---|---|
 | [Monitors](monitors.md) | Creating and changing a monitor, expected statuses, pausing, check now, deleting |
+| [Monitor kinds](monitor-kinds.md) | Keyword, TCP and TLS-expiry checks, heartbeats for cron jobs, the dead man's switch |
 | [Seeded monitors](seeded-monitors.md) | `/health` and `/ready` of every service from `MONITOR_SEEDS` |
 | [Incidents](incidents.md) | When incidents open and close, browsing them |
 | [Alerts](alerts.md) | E-mails through atc-notify when an incident opens and closes |

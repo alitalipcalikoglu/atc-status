@@ -26,6 +26,8 @@ st -X PUT $STATUS/v1/monitors/shop -d '{"paused":true}'
 st -X DELETE $STATUS/v1/monitors/shop                     # 204; checks and incidents go too
 ```
 
+Besides `http` there are the kinds `tcp`, `tls` and `heartbeat`, see [Monitor kinds](monitor-kinds.md).
+
 Pitfalls:
 - `timeoutMs` may not exceed the interval (`400 INVALID_ARGUMENT`).
 - `url` is required on create; the id is permanent (lowercase letters, digits, dashes).

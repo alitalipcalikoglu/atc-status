@@ -18,8 +18,8 @@ Tests and type check: `npm test`, `npm run typecheck`.
 
 ## Model
 
-- **Monitor**: id, name, URL, `GET`/`HEAD`, `intervalSec`, `timeoutMs`, `expectStatus`, `failThreshold`, `public`, `paused`; `origin` `api` or `env` (from `MONITOR_SEEDS`).
-- **Check**: one request; passes when the status is expected within the timeout. Redirects are not followed.
+- **Monitor**: id, name, `kind`, target, `intervalSec`, `timeoutMs`, `failThreshold`, `public`, `paused`; `origin` `api` or `env` (from `MONITOR_SEEDS`). Kinds: `http` (`GET`/`HEAD`, `expectStatus`, optional `expectText`), `tcp` (port accepts a connection), `tls` (valid certificate, not expiring within `warnDays`), `heartbeat` (a job pings `/v1/ping/:id/:token` within `intervalSec` plus `graceSec`).
+- **Check**: one probe by kind; passes within the timeout. Redirects are not followed.
 - **State**: `up`, `degraded` (failing, below the threshold), `down` (open incident), `unknown`, `paused`.
 - **Incident**: opened by `failThreshold` failed checks in a row, one per monitor at most, closed by the first passing check; alerts on open and close.
 
@@ -35,6 +35,7 @@ Tests and type check: `npm test`, `npm run typecheck`.
 | POST | `/v1/monitors/:id/check` | admin | Check now |
 | GET | `/v1/monitors/:id/checks` | read | Check history, cursor paging |
 | GET | `/v1/incidents`, `/v1/incidents/:id` | read | Incidents by monitor and state |
+| GET / POST | `/v1/ping/:id/:token` | token | Heartbeat of a monitored job |
 | POST | `/v1/hooks/webhook-out` | signature | atc-webhook-out delivery; `ops.*` events become alerts |
 | GET | `/v1/alerts` | read | Operational alerts by state |
 | POST | `/v1/alerts/:id/ack` | admin | Acknowledge an alert |
@@ -58,6 +59,7 @@ Monitors, seeded monitors, incidents, alerts, the status page and the gateway ro
 | `CHECK_RETENTION_DAYS`, `INCIDENT_RETENTION_DAYS` | `14`, `365` | |
 | `STATUS_PAGE_TITLE`, `STATUS_PAGE_CACHE_SEC` | `Service status`, `15` | Public page |
 | `NOTIFY_URL`, `NOTIFY_API_KEY`, `ALERT_EMAILS`, `ALERT_APP_NAME`, `NOTIFY_TIMEOUT_MS` | empty, empty, empty, `atc-web`, `10000` | Alerts (URL and key both or neither; recipients required with them) |
+| `HEARTBEAT_URL`, `HEARTBEAT_INTERVAL_SEC` | empty, `60` | Dead man's switch: this service GETs the URL on an interval (a healthchecks-style monitor on another host alerts when the pings stop) |
 | `ALERT_HOOK_SECRET`, `ALERT_DEDUPE_MIN` | empty, `15` | Signing secret (>= 32 chars) of the webhook-out subscription that delivers `ops.*` events; empty disables the hook. Repeats of one alert inside the window are counted, not mailed again |
 | `DB_PATH`, `DB_BACKUP_DIR`, `BODY_LIMIT`, `RATE_LIMIT_MAX` | `./data/status.db`, –, `16384`, `600` | |
 | `TRUST_PROXY`, `TLS_CERT_PATH`, `TLS_KEY_PATH`, `LOG_LEVEL` | | As in every service |
@@ -86,7 +88,7 @@ test/                       node:test suites
 
 ## Out of scope by design
 
-- TCP, ICMP, DNS, TLS-expiry and keyword (body) checks; checks from several regions.
+- ICMP and DNS checks; keyword checks beyond the first KiB of a body; checks from several regions.
 - Maintenance windows, manual incident updates and subscriptions on the status page.
 - Alert channels other than e-mail.
 

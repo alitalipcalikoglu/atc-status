@@ -12,7 +12,7 @@ export class Views {
   static monitor(m, s) {
     const day = s.uptime(m.id, 1);
     return {
-      id: m.id, name: m.name, description: m.description, url: m.url, method: m.method, intervalSec: Number(m.interval_sec), timeoutMs: Number(m.timeout_ms),
+      id: m.id, kind: m.kind, name: m.name, description: m.description, url: m.kind === 'heartbeat' ? null : m.url, method: m.kind === 'http' ? m.method : null, expectText: m.expect_text, warnDays: m.warn_days, graceSec: m.grace_sec, lastPingAt: Views.iso(m.last_ping_at), intervalSec: Number(m.interval_sec), timeoutMs: Number(m.timeout_ms),
       expectStatus: JSON.parse(m.expect_status), failThreshold: Number(m.fail_threshold), public: m.public === 1, paused: m.paused === 1, origin: m.origin,
       state: s.stateOf(m), consecutiveFailures: Number(m.consecutive_failures),
       lastCheck: m.last_check_at === null ? null : { at: Views.iso(m.last_check_at), ok: m.last_ok === 1, status: m.last_status, latencyMs: m.last_latency_ms, error: m.last_error },

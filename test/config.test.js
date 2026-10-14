@@ -46,3 +46,9 @@ test('Config: WEBHOOK_OUT_URL and WEBHOOK_OUT_API_KEY come together', () => {
   assert.equal(Config.fromEnv(testEnv({ WEBHOOK_OUT_URL: 'http://h:3009/', WEBHOOK_OUT_API_KEY: 'k' })).webhookOut?.url, 'http://h:3009');
   assert.throws(() => Config.fromEnv(testEnv({ WEBHOOK_OUT_URL: 'http://h' })), ConfigError);
 });
+
+test('Config: HEARTBEAT_URL turns the dead man\'s switch on', () => {
+  assert.equal(Config.fromEnv(testEnv()).heartbeat, null);
+  assert.deepEqual(Config.fromEnv(testEnv({ HEARTBEAT_URL: 'https://hc.example/ping/abc' })).heartbeat, { url: 'https://hc.example/ping/abc', intervalSec: 60 });
+  assert.throws(() => Config.fromEnv(testEnv({ HEARTBEAT_URL: 'ftp://x' })), ConfigError);
+});

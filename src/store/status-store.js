@@ -12,11 +12,12 @@ export class StatusStore {
       monitor: raw.prepare('SELECT * FROM monitors WHERE id = ?'),
       monitors: raw.prepare('SELECT * FROM monitors ORDER BY id'),
       count: raw.prepare('SELECT COUNT(*) AS n FROM monitors'),
-      insert: raw.prepare(`INSERT INTO monitors (id, name, description, url, method, interval_sec, timeout_ms, expect_status, fail_threshold, public, paused, origin, next_at, created_by, created_at, updated_at)
-        VALUES (:id, :name, :description, :url, :method, :interval_sec, :timeout_ms, :expect_status, :fail_threshold, :public, :paused, :origin, :next_at, :created_by, :created_at, :updated_at)`),
-      update: raw.prepare(`UPDATE monitors SET name = :name, description = :description, url = :url, method = :method, interval_sec = :interval_sec, timeout_ms = :timeout_ms,
+      insert: raw.prepare(`INSERT INTO monitors (id, name, description, kind, url, method, expect_text, warn_days, grace_sec, ping_hash, interval_sec, timeout_ms, expect_status, fail_threshold, public, paused, origin, next_at, created_by, created_at, updated_at)
+        VALUES (:id, :name, :description, :kind, :url, :method, :expect_text, :warn_days, :grace_sec, :ping_hash, :interval_sec, :timeout_ms, :expect_status, :fail_threshold, :public, :paused, :origin, :next_at, :created_by, :created_at, :updated_at)`),
+      update: raw.prepare(`UPDATE monitors SET name = :name, description = :description, url = :url, method = :method, expect_text = :expect_text, warn_days = :warn_days, grace_sec = :grace_sec, ping_hash = :ping_hash, interval_sec = :interval_sec, timeout_ms = :timeout_ms,
         expect_status = :expect_status, fail_threshold = :fail_threshold, public = :public, paused = :paused, next_at = :next_at, updated_at = :updated_at WHERE id = :id`),
       delete: raw.prepare('DELETE FROM monitors WHERE id = ?'),
+      ping: raw.prepare('UPDATE monitors SET last_ping_at = ? WHERE id = ?'),
       due: raw.prepare('SELECT * FROM monitors WHERE paused = 0 AND next_at <= ? ORDER BY next_at LIMIT ?'),
       claim: raw.prepare('UPDATE monitors SET next_at = ? WHERE id = ? AND next_at = ?'),
       result: raw.prepare('UPDATE monitors SET consecutive_failures = ?, last_check_at = ?, last_ok = ?, last_status = ?, last_latency_ms = ?, last_error = ? WHERE id = ?'),
@@ -50,11 +51,13 @@ export class StatusStore {
   monitors() { return /** @type {any} */ (this.stmt.monitors.all()); }
   count() { return Number(this.stmt.count.get()?.n ?? 0); }
   /** @param {MonitorRow} m */
-  insert(m) { this.stmt.insert.run(/** @type {any} */ (StatusStore.#named(m, ['id', 'name', 'description', 'url', 'method', 'interval_sec', 'timeout_ms', 'expect_status', 'fail_threshold', 'public', 'paused', 'origin', 'next_at', 'created_by', 'created_at', 'updated_at']))); }
+  insert(m) { this.stmt.insert.run(/** @type {any} */ (StatusStore.#named({ ...m, kind: m.kind ?? 'http' }, ['id', 'name', 'description', 'kind', 'url', 'method', 'expect_text', 'warn_days', 'grace_sec', 'ping_hash', 'interval_sec', 'timeout_ms', 'expect_status', 'fail_threshold', 'public', 'paused', 'origin', 'next_at', 'created_by', 'created_at', 'updated_at']))); }
   /** @param {MonitorRow} m */
-  update(m) { this.stmt.update.run(/** @type {any} */ (StatusStore.#named(m, ['id', 'name', 'description', 'url', 'method', 'interval_sec', 'timeout_ms', 'expect_status', 'fail_threshold', 'public', 'paused', 'next_at', 'updated_at']))); }
+  update(m) { this.stmt.update.run(/** @type {any} */ (StatusStore.#named(m, ['id', 'name', 'description', 'url', 'method', 'expect_text', 'warn_days', 'grace_sec', 'ping_hash', 'interval_sec', 'timeout_ms', 'expect_status', 'fail_threshold', 'public', 'paused', 'next_at', 'updated_at']))); }
   /** @param {string} id */
   delete(id) { this.stmt.delete.run(id); }
+  /** @param {string} id @param {number} at */
+  ping(id, at) { this.stmt.ping.run(at, id); }
 
   /** @param {number} now @param {number} limit @returns {MonitorRow[]} */
   due(now, limit) { return /** @type {any} */ (this.stmt.due.all(now, limit)); }
@@ -157,6 +160,6 @@ export class StatusStore {
 
   /** @param {Record<string, any>} o @param {string[]} keys */
   static #named(o, keys) {
-    return Object.fromEntries(keys.map((k) => [k, o[k]]));
+    return Object.fromEntries(keys.map((k) => [k, o[k] ?? null]));
   }
 }

@@ -342,6 +342,28 @@ paths:
         "403": { $ref: "#/components/responses/Forbidden" }
         "404": { $ref: "#/components/responses/NotFound" }
 
+  /v1/ping/{id}/{token}:
+    parameters:
+      - { name: id, in: path, required: true, schema: { type: string, pattern: "^[a-z0-9][a-z0-9-]{0,63}$" } }
+      - { name: token, in: path, required: true, schema: { type: string, pattern: "^[0-9a-f]{40}$" } }
+    post:
+      operationId: atc-status.ping.post
+      summary: A heartbeat from a monitored job (no API key; the path token is the credential)
+      description: Records the ping. A monitor with an open incident is checked at once and recovers on the ping. GET does the same, for curl and wget.
+      tags: [monitors]
+      security: []
+      responses:
+        "204": { description: Recorded. }
+        "404": { description: No heartbeat monitor with that id and token (or it is paused). }
+    get:
+      operationId: atc-status.ping.get
+      summary: Same as POST
+      tags: [monitors]
+      security: []
+      responses:
+        "204": { description: Recorded. }
+        "404": { description: No heartbeat monitor with that id and token (or it is paused). }
+
   /v1/stats:
     get:
       operationId: atc-status.stats.get
@@ -384,7 +406,7 @@ components:
     Forbidden: { description: "`FORBIDDEN`: role.", content: { application/json: { schema: { $ref: "#/components/schemas/ErrorEnvelope" } } } }
     NotFound: { description: "`MONITOR_NOT_FOUND` or `INCIDENT_NOT_FOUND`.", content: { application/json: { schema: { $ref: "#/components/schemas/ErrorEnvelope" } } } }
     Conflict: { description: "`INVALID_STATE` or `LIMIT_EXCEEDED`.", content: { application/json: { schema: { $ref: "#/components/schemas/ErrorEnvelope" } } } }
-    MonitorSet: { description: Created (201) or updated (200)., content: { application/json: { schema: { type: object, required: [created, monitor], properties: { created: { type: boolean }, monitor: { $ref: "#/components/schemas/Monitor" } } } } } }
+    MonitorSet: { description: Created (201) or updated (200)., content: { application/json: { schema: { type: object, required: [created, monitor], properties: { created: { type: boolean }, monitor: { $ref: "#/components/schemas/Monitor" }, pingToken: { type: string, description: "Heartbeat monitors on create or rotateToken, once." }, pingPath: { type: string, description: "`/v1/ping/{id}/{token}` for the same cases." } } } } } }
   schemas:
     ErrorEnvelope: { type: object, required: [error], properties: { error: { type: object, required: [code, message], properties: { code: { type: string }, message: { type: string }, details: {} } } } }
     State: { type: string, enum: [up, down, degraded, unknown, paused], description: "`down` = open incident; `degraded` = last check failed, below the threshold." }
@@ -394,8 +416,13 @@ components:
       properties:
         name: { type: string, minLength: 1, maxLength: 100 }
         description: { type: string, maxLength: 500 }
+        kind: { type: string, enum: [http, tcp, tls, heartbeat], description: "Fixed at creation; default `http`. `tcp` and `tls` take `url` as `https://host:port` (only host and port are used). `heartbeat` has no target: the monitored job pings `/v1/ping/{id}/{token}` within `intervalSec` plus `graceSec`." }
         url: { type: string, minLength: 8, maxLength: 2000, pattern: "^https?://" }
         method: { type: string, enum: [GET, HEAD] }
+        expectText: { type: [string, "null"], maxLength: 200, description: "http with GET only: text the first KiB of the body must contain." }
+        warnDays: { type: integer, minimum: 1, maximum: 365, description: "tls only, default 14: fail when the certificate expires within this many days." }
+        graceSec: { type: integer, minimum: 0, maximum: 86400, description: "heartbeat only, default 60: how late a ping may be." }
+        rotateToken: { type: boolean, description: "heartbeat only: issue a new ping token (shown once in the response); the old one stops working." }
         intervalSec: { type: integer, minimum: 10, maximum: 86400 }
         timeoutMs: { type: integer, minimum: 500, maximum: 60000, description: Not more than the interval. }
         expectStatus: { type: array, minItems: 1, maxItems: 20, items: { type: integer, minimum: 100, maximum: 599 } }
@@ -406,10 +433,15 @@ components:
       type: object
       properties:
         id: { type: string }
+        kind: { type: string, enum: [http, tcp, tls, heartbeat] }
         name: { type: string }
         description: { type: string }
-        url: { type: string }
-        method: { type: string, enum: [GET, HEAD] }
+        url: { type: [string, "null"], description: "null for heartbeat monitors." }
+        method: { type: [string, "null"], enum: [GET, HEAD, null], description: "null unless kind is http." }
+        expectText: { type: [string, "null"] }
+        warnDays: { type: [integer, "null"] }
+        graceSec: { type: [integer, "null"] }
+        lastPingAt: { type: [string, "null"], format: date-time }
         intervalSec: { type: integer }
         timeoutMs: { type: integer }
         expectStatus: { type: array, items: { type: integer } }

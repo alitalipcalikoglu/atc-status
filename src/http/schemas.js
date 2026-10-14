@@ -1,6 +1,7 @@
 /** JSON Schemas for the HTTP surface. */
 export class Schemas {
   static monitorId = { type: 'string', pattern: '^[a-z0-9][a-z0-9-]{0,63}$' };
+  static pingParams = { type: 'object', properties: { id: { type: 'string', pattern: '^[a-z0-9][a-z0-9-]{0,63}$' }, token: { type: 'string', pattern: '^[0-9a-f]{40}$' } }, required: ['id', 'token'] };
   static incidentId = { type: 'string', pattern: '^inc_[0-9a-z]{6,12}[0-9a-f]{16}$' };
 
   static putMonitor = {
@@ -8,7 +9,12 @@ export class Schemas {
     properties: {
       name: { type: 'string', minLength: 1, maxLength: 100 },
       description: { type: 'string', maxLength: 500 },
+      kind: { type: 'string', enum: ['http', 'tcp', 'tls', 'heartbeat'] },
       url: { type: 'string', minLength: 8, maxLength: 2_000, pattern: '^https?://' },
+      expectText: { type: ['string', 'null'], maxLength: 200 },
+      warnDays: { type: 'integer', minimum: 1, maximum: 365 },
+      graceSec: { type: 'integer', minimum: 0, maximum: 86_400 },
+      rotateToken: { type: 'boolean' },
       method: { type: 'string', enum: ['GET', 'HEAD'] },
       intervalSec: { type: 'integer', minimum: 10, maximum: 86_400 },
       timeoutMs: { type: 'integer', minimum: 500, maximum: 60_000 },

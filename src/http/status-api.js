@@ -32,12 +32,14 @@ export class StatusApi {
    * @param {import('../types.js').Logger} [deps.logger]
    * @param {import('@atc-web/atc-service-core/audit').AuditClient} [deps.audit]
    * @param {import('../events/event-publisher.js').EventPublisher} [deps.publisher]
+   * @param {import('../net/outbound-heartbeat.js').OutboundHeartbeat} [deps.heartbeat]
    */
-  constructor({ config, audit, publisher, service, alerts, db, version, logger }) {
+  constructor({ config, audit, publisher, heartbeat, service, alerts, db, version, logger }) {
     this.alerts = alerts;
     this.config = config;
     this.audit = audit;
     this.publisher = publisher ?? null;
+    this.heartbeat = heartbeat ?? null;
     this.service = service;
     this.db = db;
     this.version = version;
@@ -71,7 +73,7 @@ export class StatusApi {
       extra: () => ({ monitors: this.service.store.count(), checker: this.service.stopping.signal.aborted ? 'stopped' : 'running', notify: config.notify ? 'enabled' : 'disabled', alertHook: config.alertHookSecret ? 'enabled' : 'disabled' }),
     });
     registerOpenApi(app, new URL('../../openapi.yaml', import.meta.url));
-    registerInfo(app, { service: 'atc-status', version: this.version, capabilities: ['http-checks', 'incidents', 'email-alerts', 'public-status-page', 'seeded-monitors', 'ssrf-guard'], schemaVersion: this.db.schemaVersion });
+    registerInfo(app, { service: 'atc-status', version: this.version, capabilities: ['http-checks', 'tcp-tls-heartbeat-checks', 'incidents', 'alert-hub', 'email-alerts', 'public-status-page', 'seeded-monitors', 'ssrf-guard'], schemaVersion: this.db.schemaVersion });
     this.#registerPublic(app);
     await app.register((hooks) => this.#registerHooks(hooks));
     await app.register((api) => this.#registerV1(api), { prefix: '/v1' });
@@ -93,6 +95,15 @@ export class StatusApi {
   /** @param {FastifyInstance} app */
   #registerPublic(app) {
     const cache = `public, max-age=${this.config.page.cacheSec}`;
+    // Heartbeats: a cron job or script pings its monitor; the token in the path is the credential (no API key).
+    app.route({
+      method: ['GET', 'POST'], url: '/v1/ping/:id/:token', logLevel: 'warn', schema: { params: Schemas.pingParams },
+      handler: async (request, reply) => {
+        const { id, token } = /** @type {{ id: string, token: string }} */ (request.params);
+        await this.service.ping(id, token);
+        return reply.code(204).send();
+      },
+    });
     app.get('/status', { logLevel: 'warn' }, async (_request, reply) => {
       reply.header('content-security-policy', StatusPage.CSP).header('cache-control', cache).header('referrer-policy', 'no-referrer').type('text/html; charset=utf-8');
       return StatusPage.render(this.service.publicSummary());
@@ -121,8 +132,8 @@ export class StatusApi {
     api.get('/monitors', read, async () => ({ items: s.list().map((m) => Views.monitor(m, s)) }));
 
     api.put('/monitors/:id', { config: { audit: AuditClient.route('atc-status.monitor.upsert', target, (r, b) => ({ created: b?.created, settings: r.body })) }, ...admin, schema: { params: Schemas.monitorParams, body: Schemas.putMonitor } }, async (request, reply) => {
-      const { monitor, created } = s.put(mid(request), /** @type {any} */ (request.body ?? {}), request.apiKey.id);
-      return reply.code(created ? 201 : 200).send({ created, monitor: Views.monitor(monitor, s) });
+      const { monitor, created, pingToken } = s.put(mid(request), /** @type {any} */ (request.body ?? {}), request.apiKey.id);
+      return reply.code(created ? 201 : 200).send({ created, monitor: Views.monitor(monitor, s), ...(pingToken ? { pingToken, pingPath: `/v1/ping/${monitor.id}/${pingToken}` } : {}) });
     });
 
     api.get('/monitors/:id', { ...read, schema: { params: Schemas.monitorParams } }, async (request) => {
@@ -201,6 +212,7 @@ export class StatusApi {
         ...ms.map((m) => `status_incident_open{monitor="${label(m.id)}"} ${s.store.openOf(m.id) ? 1 : 0}`),
         ...AuditMetrics.lines(this.audit),
         ...(this.publisher?.metricLines() ?? []),
+        ...(this.heartbeat?.metricLines() ?? []),
         '# HELP status_alerts_open Alerts that are not acknowledged yet, by severity.',
         '# TYPE status_alerts_open gauge',
         `status_alerts_open{severity="critical"} ${s.store.alertCounts().critical}`,
