@@ -1,0 +1,393 @@
+openapi: 3.1.0
+info:
+  title: atc-status
+  version: "1.0.0"
+  description: >
+    Uptime monitors with HTTP checks. Each monitor is checked every `intervalSec`; a check passes
+    when the response status is in `expectStatus` within `timeoutMs` (redirects are not followed).
+    `failThreshold` failed checks in a row open an incident (one per monitor at most); the first
+    passing check closes it. Opening and closing an incident e-mails ALERT_EMAILS through atc-notify
+    when configured. Monitors created through the API pass the SSRF guard (`TARGET_*`); monitors
+    seeded from `MONITOR_SEEDS` (`<id>-health`, `<id>-ready`) are operator configuration.
+
+
+    Auth: `Authorization: Bearer <api-key>` on every `/v1/*` and `/metrics` route. Roles: `read`
+    (monitors, checks, incidents, stats) and `admin` (also create, change, check now, delete).
+    `/status` and `/status/summary.json` are public and show public monitors only, without URLs or
+    error texts.
+servers:
+  - url: /
+security:
+  - ApiKeyAuth: []
+tags:
+  - name: monitors
+  - name: incidents
+  - name: public
+  - name: stats
+  - name: ops
+paths:
+  /openapi.yaml:
+    get:
+      operationId: atc-status.openapi
+      summary: Download the canonical OpenAPI document
+      security: []
+      responses:
+        "200": { description: Canonical OpenAPI document., content: { text/yaml: { schema: { type: string } } } }
+  /health:
+    get:
+      operationId: atc-status.health.get
+      summary: Liveness probe
+      tags: [ops]
+      security: []
+      x-stack-visibility: public
+      responses:
+        "200": { description: Process is up., content: { application/json: { schema: { type: object, required: [status], properties: { status: { type: string, enum: [ok] } } } } } }
+  /ready:
+    get:
+      operationId: atc-status.ready.get
+      summary: Readiness probe
+      description: Database ping, cached for 10 seconds. The body also says how many monitors exist, whether the checker runs and whether alerts are enabled.
+      tags: [ops]
+      security: []
+      x-stack-visibility: public
+      responses:
+        "200":
+          description: Ready.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [status, monitors, checker, notify]
+                properties:
+                  status: { type: string, enum: [ok] }
+                  monitors: { type: integer }
+                  checker: { type: string, enum: [running, stopped] }
+                  notify: { type: string, enum: [enabled, disabled] }
+        "503": { description: The cached readiness check last failed., content: { application/json: { schema: { type: object, required: [status, error], properties: { status: { type: string, enum: [unavailable] }, error: { type: string } } } } } }
+  /v1/info:
+    get:
+      operationId: atc-status.info.get
+      summary: Service identity and capabilities
+      tags: [ops]
+      security: []
+      x-stack-visibility: public
+      responses:
+        "200":
+          description: Instance identity.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [service, version, apiVersion, capabilities, schemaVersion, serviceCore]
+                properties:
+                  service: { type: string, const: atc-status }
+                  version: { type: string }
+                  apiVersion: { type: string, const: v1 }
+                  capabilities: { type: array, items: { type: string }, description: "`http-checks`, `incidents`, `email-alerts`, `public-status-page`, `seeded-monitors`, `ssrf-guard`." }
+                  schemaVersion: { type: integer }
+                  serviceCore: { type: string }
+  /metrics:
+    get:
+      operationId: atc-status.metrics.get
+      summary: Prometheus text-format metrics
+      description: Requires a `read`-capable key. Not rate-limited.
+      tags: [ops]
+      x-stack-visibility: operational
+      responses:
+        "200": { description: "`status_monitor_up{monitor}`, `status_check_latency_ms{monitor}`, `status_incident_open{monitor}`, `status_process_uptime_seconds`.", content: { text/plain: { schema: { type: string } } } }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+
+  /status:
+    get:
+      operationId: atc-status.page.get
+      summary: Public status page (HTML)
+      description: Overall state, public monitors with 24 h and 7 d uptime, recent incidents. No scripts; strict CSP; cached for STATUS_PAGE_CACHE_SEC.
+      tags: [public]
+      security: []
+      x-stack-visibility: public
+      responses:
+        "200": { description: The page., content: { text/html: { schema: { type: string } } } }
+  /status/summary.json:
+    get:
+      operationId: atc-status.page.summary
+      summary: Public status data (JSON)
+      description: The data behind the status page. CORS open; cached for STATUS_PAGE_CACHE_SEC.
+      tags: [public]
+      security: []
+      x-stack-visibility: public
+      responses:
+        "200":
+          description: Public summary.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [title, overall, updatedAt, monitors, incidents]
+                properties:
+                  title: { type: string }
+                  overall: { type: string, enum: [operational, degraded, outage] }
+                  updatedAt: { type: string, format: date-time }
+                  monitors:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        name: { type: string }
+                        state: { $ref: "#/components/schemas/State" }
+                        uptime24h: { type: [number, "null"] }
+                        uptime7d: { type: [number, "null"] }
+                        latencyMs: { type: [integer, "null"] }
+                        checkedAt: { type: [string, "null"], format: date-time }
+                  incidents:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        monitor: { type: string, description: Monitor name. }
+                        openedAt: { type: string, format: date-time }
+                        closedAt: { type: [string, "null"], format: date-time }
+                        durationSec: { type: integer }
+
+  /v1/monitors:
+    get:
+      operationId: atc-status.monitors.list
+      summary: Monitors with their state
+      tags: [monitors]
+      responses:
+        "200":
+          description: Every monitor, by id.
+          content:
+            application/json:
+              schema: { type: object, required: [items], properties: { items: { type: array, items: { $ref: "#/components/schemas/Monitor" } } } }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+
+  /v1/monitors/{id}:
+    parameters: [{ $ref: "#/components/parameters/MonitorParam" }]
+    put:
+      operationId: atc-status.monitors.upsert
+      summary: Create a monitor or change it (admin)
+      description: Omitted fields keep their value (defaults on create - GET, every 60 s, 5 s timeout, expect 200, 2 failures, not public). `url` is required on create; the URL of a seeded monitor cannot be changed. A new monitor, a new URL or interval, or unpausing checks at once.
+      tags: [monitors]
+      requestBody:
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/MonitorSettings" }
+      responses:
+        "200": { $ref: "#/components/responses/MonitorSet" }
+        "201": { $ref: "#/components/responses/MonitorSet" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "409": { $ref: "#/components/responses/Conflict" }
+    get:
+      operationId: atc-status.monitors.get
+      summary: One monitor with uptime over 24 h, 7 d and 30 d
+      tags: [monitors]
+      responses:
+        "200":
+          description: The monitor.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [monitor, uptime, openIncident]
+                properties:
+                  monitor: { $ref: "#/components/schemas/Monitor" }
+                  uptime:
+                    type: object
+                    additionalProperties: { type: object, properties: { checks: { type: integer }, uptime: { type: [number, "null"] }, avgMs: { type: [integer, "null"] } } }
+                  openIncident: { oneOf: [{ $ref: "#/components/schemas/Incident" }, { type: "null" }] }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+    delete:
+      operationId: atc-status.monitors.delete
+      summary: Delete a monitor with its checks and incidents (admin)
+      description: Seeded monitors cannot be deleted (`409 INVALID_STATE`); pause them instead.
+      tags: [monitors]
+      responses:
+        "204": { description: Deleted. }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "409": { $ref: "#/components/responses/Conflict" }
+
+  /v1/monitors/{id}/check:
+    parameters: [{ $ref: "#/components/parameters/MonitorParam" }]
+    post:
+      operationId: atc-status.monitors.check
+      summary: Check a monitor now (admin)
+      description: Runs one check (paused or not), records it and applies the incident rules like a scheduled check.
+      tags: [monitors]
+      responses:
+        "200":
+          description: Result and the monitor afterwards.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [check, monitor]
+                properties:
+                  check: { type: object, properties: { ok: { type: boolean }, status: { type: [integer, "null"] }, latencyMs: { type: integer }, error: { type: [string, "null"] } } }
+                  monitor: { $ref: "#/components/schemas/Monitor" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+
+  /v1/monitors/{id}/checks:
+    parameters: [{ $ref: "#/components/parameters/MonitorParam" }]
+    get:
+      operationId: atc-status.monitors.checks
+      summary: Recent checks, newest first
+      tags: [monitors]
+      parameters:
+        - { name: limit, in: query, schema: { type: string, pattern: "^([1-9]|[1-9][0-9]|1[0-9][0-9]|200)$" }, description: "1-200, default 50." }
+        - { name: cursor, in: query, schema: { type: string, pattern: "^[0-9]{1,15}$" } }
+      responses:
+        "200":
+          description: One page.
+          content:
+            application/json:
+              schema: { type: object, required: [items, nextCursor], properties: { items: { type: array, items: { $ref: "#/components/schemas/Check" } }, nextCursor: { type: [string, "null"] } } }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+
+  /v1/incidents:
+    get:
+      operationId: atc-status.incidents.list
+      summary: Incidents, newest first
+      tags: [incidents]
+      parameters:
+        - { name: monitor, in: query, schema: { type: string, pattern: "^[a-z0-9][a-z0-9-]{0,63}$" } }
+        - { name: state, in: query, schema: { type: string, enum: [open, closed] } }
+        - { name: limit, in: query, schema: { type: string, pattern: "^([1-9]|[1-9][0-9]|100)$" } }
+        - { name: cursor, in: query, schema: { type: string } }
+      responses:
+        "200":
+          description: One page.
+          content:
+            application/json:
+              schema: { type: object, required: [items, nextCursor], properties: { items: { type: array, items: { $ref: "#/components/schemas/Incident" } }, nextCursor: { type: [string, "null"] } } }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+
+  /v1/incidents/{id}:
+    parameters: [{ name: id, in: path, required: true, schema: { type: string, pattern: "^inc_[0-9a-z]{6,12}[0-9a-f]{16}$" } }]
+    get:
+      operationId: atc-status.incidents.get
+      summary: One incident
+      tags: [incidents]
+      responses:
+        "200": { description: The incident., content: { application/json: { schema: { type: object, required: [incident], properties: { incident: { $ref: "#/components/schemas/Incident" } } } } } }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+
+  /v1/stats:
+    get:
+      operationId: atc-status.stats.get
+      summary: Monitors by state and incident counts
+      tags: [stats]
+      responses:
+        "200":
+          description: Totals.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [monitors, up, down, degraded, unknown, paused, openIncidents, incidents24h, notify]
+                properties:
+                  monitors: { type: integer }
+                  up: { type: integer }
+                  down: { type: integer }
+                  degraded: { type: integer }
+                  unknown: { type: integer }
+                  paused: { type: integer }
+                  openIncidents: { type: integer }
+                  incidents24h: { type: integer }
+                  notify: { type: boolean }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+
+components:
+  securitySchemes:
+    ApiKeyAuth:
+      type: http
+      scheme: bearer
+      description: "`STATUS_API_KEYS=id:secret:role`; role `read` or `admin`."
+  parameters:
+    MonitorParam: { name: id, in: path, required: true, schema: { type: string, pattern: "^[a-z0-9][a-z0-9-]{0,63}$" } }
+  responses:
+    BadRequest: { description: "`VALIDATION_FAILED`, `INVALID_ARGUMENT` or `TARGET_NOT_ALLOWED`.", content: { application/json: { schema: { $ref: "#/components/schemas/ErrorEnvelope" } } } }
+    Unauthorized: { description: Missing or invalid API key., headers: { www-authenticate: { schema: { type: string, const: Bearer } } }, content: { application/json: { schema: { $ref: "#/components/schemas/ErrorEnvelope" } } } }
+    Forbidden: { description: "`FORBIDDEN`: role.", content: { application/json: { schema: { $ref: "#/components/schemas/ErrorEnvelope" } } } }
+    NotFound: { description: "`MONITOR_NOT_FOUND` or `INCIDENT_NOT_FOUND`.", content: { application/json: { schema: { $ref: "#/components/schemas/ErrorEnvelope" } } } }
+    Conflict: { description: "`INVALID_STATE` or `LIMIT_EXCEEDED`.", content: { application/json: { schema: { $ref: "#/components/schemas/ErrorEnvelope" } } } }
+    MonitorSet: { description: Created (201) or updated (200)., content: { application/json: { schema: { type: object, required: [created, monitor], properties: { created: { type: boolean }, monitor: { $ref: "#/components/schemas/Monitor" } } } } } }
+  schemas:
+    ErrorEnvelope: { type: object, required: [error], properties: { error: { type: object, required: [code, message], properties: { code: { type: string }, message: { type: string }, details: {} } } } }
+    State: { type: string, enum: [up, down, degraded, unknown, paused], description: "`down` = open incident; `degraded` = last check failed, below the threshold." }
+    MonitorSettings:
+      type: object
+      additionalProperties: false
+      properties:
+        name: { type: string, minLength: 1, maxLength: 100 }
+        description: { type: string, maxLength: 500 }
+        url: { type: string, minLength: 8, maxLength: 2000, pattern: "^https?://" }
+        method: { type: string, enum: [GET, HEAD] }
+        intervalSec: { type: integer, minimum: 10, maximum: 86400 }
+        timeoutMs: { type: integer, minimum: 500, maximum: 60000, description: Not more than the interval. }
+        expectStatus: { type: array, minItems: 1, maxItems: 20, items: { type: integer, minimum: 100, maximum: 599 } }
+        failThreshold: { type: integer, minimum: 1, maximum: 20, description: Failed checks in a row that open an incident. }
+        public: { type: boolean, description: Shown on the public status page (by name only). }
+        paused: { type: boolean }
+    Monitor:
+      type: object
+      properties:
+        id: { type: string }
+        name: { type: string }
+        description: { type: string }
+        url: { type: string }
+        method: { type: string, enum: [GET, HEAD] }
+        intervalSec: { type: integer }
+        timeoutMs: { type: integer }
+        expectStatus: { type: array, items: { type: integer } }
+        failThreshold: { type: integer }
+        public: { type: boolean }
+        paused: { type: boolean }
+        origin: { type: string, enum: [env, api], description: "`env` = from MONITOR_SEEDS." }
+        state: { $ref: "#/components/schemas/State" }
+        consecutiveFailures: { type: integer }
+        lastCheck: { oneOf: [{ $ref: "#/components/schemas/Check" }, { type: "null" }] }
+        nextCheckAt: { type: [string, "null"], format: date-time }
+        uptime24h: { type: [number, "null"] }
+        avgLatency24hMs: { type: [integer, "null"] }
+        createdBy: { type: string }
+        createdAt: { type: string, format: date-time }
+        updatedAt: { type: string, format: date-time }
+    Check:
+      type: object
+      properties:
+        at: { type: string, format: date-time }
+        ok: { type: boolean }
+        status: { type: [integer, "null"] }
+        latencyMs: { type: integer }
+        error: { type: [string, "null"] }
+    Incident:
+      type: object
+      properties:
+        id: { type: string }
+        monitor: { type: string }
+        state: { type: string, enum: [open, closed] }
+        openedAt: { type: string, format: date-time }
+        closedAt: { type: [string, "null"], format: date-time }
+        durationSec: { type: integer }
+        cause: { type: string }
+        lastError: { type: [string, "null"] }
+        failures: { type: integer }
+        notifyError: { type: [string, "null"] }
