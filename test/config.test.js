@@ -27,3 +27,9 @@ test('Config: rejects bad input', () => {
   bad({ TARGET_ALLOW_PRIVATE: 'true' }, /TARGET_ALLOWED_HOSTS is required/);
   bad({ TLS_KEY_PATH: '/k.pem' }, /must be set together/);
 });
+
+test('Config: ALERT_EMAILS is capped at the notify recipient limit', () => {
+  const many = Array.from({ length: 11 }, (_, i) => `u${i}@example.com`).join(',');
+  assert.throws(() => Config.fromEnv(testEnv({ NOTIFY_URL: 'http://n', NOTIFY_API_KEY: 'n'.repeat(40), ALERT_EMAILS: many })), (e) => e instanceof ConfigError && /at most 10/.test(e.message));
+  assert.equal(Config.fromEnv(testEnv({ NOTIFY_URL: 'http://n', NOTIFY_API_KEY: 'n'.repeat(40), ALERT_EMAILS: many.split(',').slice(0, 10).join(',') })).notify?.to.length, 10);
+});

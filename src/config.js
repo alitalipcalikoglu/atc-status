@@ -100,6 +100,8 @@ export class Config {
     if (!/^https?:\/\/[^\s]+$/.test(url)) throw new ConfigError('NOTIFY_URL must be an absolute http(s) URL');
     const to = r.list('ALERT_EMAILS');
     if (!to.length) throw new ConfigError('ALERT_EMAILS is required when NOTIFY_URL is set');
+    // atc-notify accepts at most 10 recipients per message; more would make every alert fail with a 400.
+    if (to.length > 10) throw new ConfigError('ALERT_EMAILS may list at most 10 addresses (atc-notify limit per message); use a distribution list');
     for (const e of to) if (!Config.EMAIL_PATTERN.test(e)) throw new ConfigError(`ALERT_EMAILS entry "${e}" is not an e-mail address`);
     return { url, apiKey, to, appName: r.optional('ALERT_APP_NAME') || 'atc-web', timeoutMs: r.integer('NOTIFY_TIMEOUT_MS', 10_000, { min: 500 }) };
   }
