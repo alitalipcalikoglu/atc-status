@@ -61,6 +61,7 @@ Monitors, seeded monitors, incidents, alerts, the status page and the gateway ro
 | `ALERT_HOOK_SECRET`, `ALERT_DEDUPE_MIN` | empty, `15` | Signing secret (>= 32 chars) of the webhook-out subscription that delivers `ops.*` events; empty disables the hook. Repeats of one alert inside the window are counted, not mailed again |
 | `DB_PATH`, `DB_BACKUP_DIR`, `BODY_LIMIT`, `RATE_LIMIT_MAX` | `./data/status.db`, –, `16384`, `600` | |
 | `TRUST_PROXY`, `TLS_CERT_PATH`, `TLS_KEY_PATH`, `LOG_LEVEL` | | As in every service |
+| `WEBHOOK_OUT_URL`, `WEBHOOK_OUT_API_KEY`, `WEBHOOK_OUT_TIMEOUT_MS` | empty, empty, `5000` | Publish events to atc-webhook-out (URL and key both or neither; a `publish` key) |
 | `AUDIT_URL`, `AUDIT_API_KEY` | empty | Forward audit events (both or neither) |
 
 ## Security notes
@@ -89,6 +90,10 @@ test/                       node:test suites
 - Maintenance windows, manual incident updates and subscriptions on the status page.
 - Alert channels other than e-mail.
 
+## Events
+
+With `WEBHOOK_OUT_URL` set, an opened or closed incident publishes `incident.opened` or `incident.closed` (id, monitor, name, cause, failures; no URL, no error text). Best effort; see [examples/events.md](examples/events.md). The alert hub (`/v1/hooks/webhook-out`) is the receiving side for `ops.*` events, see [examples/operational-alerts.md](examples/operational-alerts.md).
+
 ## Audit events
 
 With `AUDIT_URL` and `AUDIT_API_KEY` set, `atc-status.monitor.upsert` (meta: created, settings) and `atc-status.monitor.delete` and `atc-status.alert.ack` are forwarded with `success`, or `denied` on 403. Details: [examples/audit-events.md](examples/audit-events.md).
@@ -100,6 +105,8 @@ With `AUDIT_URL` and `AUDIT_API_KEY` set, `atc-status.monitor.upsert` (meta: cre
 ## Observability
 
 Request logs with request id and trace context; incident open/close log lines; `/metrics` (up, latency, open incident per monitor); `/v1/stats`; `/ready`.
+
+Event publishing is observable as `events_publish_enabled`, `events_publish_total{result="published|sent|dropped|failed"}` and `events_publish_pending`.
 
 Audit forwarding is observable too: `audit_forward_enabled`, `audit_forward_events_total{result="recorded|sent|dropped|failed"}` and `audit_forward_pending`. A rising `dropped`, or a `pending` that does not drain, means audit events are being lost or delayed; alert on it.
 

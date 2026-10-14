@@ -10,6 +10,7 @@ import { StatusApi } from './http/status-api.js';
 import { Checker } from './net/checker.js';
 import { Notifier } from './net/notifier.js';
 import { StatusStore } from './store/status-store.js';
+import { EventPublisher } from './events/event-publisher.js';
 
 /** Composition root: wires configuration, storage, checker and HTTP, runs the check loop, owns the lifecycle. */
 export class Application {
@@ -20,12 +21,14 @@ export class Application {
     this.config = config;
     this.version = readServiceVersion(import.meta.url);
     this.audit = new AuditClient({ target: config.audit });
+    this.publisher = new EventPublisher({ source: 'atc-status', target: config.webhookOut });
     this.db = new Database(config.dbPath, { backupDir: config.dbBackupDir });
     this.store = new StatusStore(this.db);
     this.service = new StatusService({
       config, store: this.store,
       checker: new Checker({ guard: new NetGuard(config.target) }),
       notifier: config.notify ? new Notifier(config.notify) : null,
+      publisher: this.publisher,
     });
     this.alerts = new AlertService({ config, store: this.store, notifier: config.notify ? new Notifier(config.notify) : null });
     /** @type {import('fastify').FastifyInstance|null} */
@@ -51,7 +54,7 @@ export class Application {
 
   async start() {
     const { config } = this;
-    const app = await new StatusApi({ config, audit: this.audit, service: this.service, alerts: this.alerts, db: this.db, version: this.version }).build();
+    const app = await new StatusApi({ config, audit: this.audit, publisher: this.publisher, service: this.service, alerts: this.alerts, db: this.db, version: this.version }).build();
     this.app = app;
     this.service.logger = app.log;
     this.alerts.logger = app.log;
@@ -70,12 +73,14 @@ export class Application {
         () => { for (const t of this.timers) clearInterval(t); this.service.stopping.abort(); },
         () => this.app?.close(),
         () => this.service.idle(),
+        () => this.publisher.close(),
         () => this.audit.close(),
         () => this.db.close(),
       ],
     });
     this.shutdown = shutdown;
     this.audit.logger = app.log;
+    this.publisher.logger = app.log;
     this.audit.start();
     await app.listen({ port: config.port, host: config.host });
     app.log.info({ tls: config.tls !== null, monitors: this.store.count(), notify: config.notify !== null }, config.tls ? 'serving HTTPS' : 'serving plain HTTP, terminate TLS at a reverse proxy');

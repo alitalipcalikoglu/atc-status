@@ -21,14 +21,16 @@ export class StatusService {
    * @param {import('../store/status-store.js').StatusStore} deps.store
    * @param {import('../net/checker.js').Checker} deps.checker
    * @param {import('../net/notifier.js').Notifier|null} [deps.notifier]
+   * @param {{ publish: (type: string, data?: unknown) => boolean }} [deps.publisher]
    * @param {() => number} [deps.now]
    * @param {import('../types.js').Logger} [deps.logger]
    */
-  constructor({ config, store, checker, notifier = null, now = Date.now, logger }) {
+  constructor({ config, store, checker, notifier = null, publisher, now = Date.now, logger }) {
     this.config = config;
     this.store = store;
     this.checker = checker;
     this.notifier = notifier;
+    this.publisher = publisher ?? { publish: () => false };
     this.now = now;
     this.logger = logger;
     this.stopping = new AbortController();
@@ -249,6 +251,7 @@ export class StatusService {
   /** @param {'opened'|'closed'} event @param {IncidentRow} incident @param {MonitorRow} m */
   async #notify(event, incident, m) {
     this.logger?.[event === 'opened' ? 'warn' : 'info']({ monitor: m.id, incident: incident.id }, `incident ${event}`);
+    this.publisher.publish(`incident.${event}`, { id: incident.id, monitor: m.id, name: m.name, cause: incident.cause, failures: Number(incident.failures) });
     if (!this.notifier) return;
     try {
       await this.notifier.incident(event, incident, m);

@@ -40,3 +40,9 @@ test('Config: ALERT_HOOK_SECRET needs 32 characters; empty disables the hook', (
   assert.throws(() => Config.fromEnv(testEnv({ ALERT_HOOK_SECRET: 'short' })), ConfigError);
   assert.equal(Config.fromEnv(testEnv()).alertDedupeMin, 15);
 });
+
+test('Config: WEBHOOK_OUT_URL and WEBHOOK_OUT_API_KEY come together', () => {
+  assert.equal(Config.fromEnv(testEnv()).webhookOut, null);
+  assert.equal(Config.fromEnv(testEnv({ WEBHOOK_OUT_URL: 'http://h:3009/', WEBHOOK_OUT_API_KEY: 'k' })).webhookOut?.url, 'http://h:3009');
+  assert.throws(() => Config.fromEnv(testEnv({ WEBHOOK_OUT_URL: 'http://h' })), ConfigError);
+});

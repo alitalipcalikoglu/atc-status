@@ -31,11 +31,13 @@ export class StatusApi {
    * @param {string} deps.version
    * @param {import('../types.js').Logger} [deps.logger]
    * @param {import('@atc-web/atc-service-core/audit').AuditClient} [deps.audit]
+   * @param {import('../events/event-publisher.js').EventPublisher} [deps.publisher]
    */
-  constructor({ config, audit, service, alerts, db, version, logger }) {
+  constructor({ config, audit, publisher, service, alerts, db, version, logger }) {
     this.alerts = alerts;
     this.config = config;
     this.audit = audit;
+    this.publisher = publisher ?? null;
     this.service = service;
     this.db = db;
     this.version = version;
@@ -198,6 +200,7 @@ export class StatusApi {
         '# TYPE status_incident_open gauge',
         ...ms.map((m) => `status_incident_open{monitor="${label(m.id)}"} ${s.store.openOf(m.id) ? 1 : 0}`),
         ...AuditMetrics.lines(this.audit),
+        ...(this.publisher?.metricLines() ?? []),
         '# HELP status_alerts_open Alerts that are not acknowledged yet, by severity.',
         '# TYPE status_alerts_open gauge',
         `status_alerts_open{severity="critical"} ${s.store.alertCounts().critical}`,

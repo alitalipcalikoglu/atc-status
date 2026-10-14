@@ -50,7 +50,8 @@ test('incidents: open after failThreshold failures in a row, one per monitor, cl
   /** @type {string[]} */ const sent = [];
   let notifyFails = false;
   const notifier = { incident: async (/** @type {string} */ ev, /** @type {any} */ i) => { if (notifyFails) throw new Error('atc-notify responded 503'); sent.push(`${ev}:${i.id}:${i.failures}`); } };
-  const t = testService(undefined, { now: clock.now, notifier });
+  /** @type {any[]} */ const published = [];
+  const t = testService(undefined, { now: clock.now, notifier, publisher: { publish: (/** @type {string} */ type, /** @type {any} */ d) => published.push([type, d.id, d.monitor, d.failures, Object.keys(d).join()]) } });
   t.service.put('api', { url: 'https://api.example.com/health', failThreshold: 2 }, 'x');
   const url = 'https://api.example.com/health';
   t.checker.results.set(url, [FAIL, FAIL, FAIL, OK]);
@@ -68,6 +69,7 @@ test('incidents: open after failThreshold failures in a row, one per monitor, cl
   await t.service.checkNow('api');
   const closed = t.store.incident(open.id);
   assert.deepEqual([closed?.closed_at, closed?.notify_error, t.service.stateOf(t.service.get('api')), t.service.get('api').consecutive_failures], [clock.now(), 'closed: atc-notify responded 503', 'up', 0]);
+  assert.deepEqual(published.map((e) => e.slice(0, 3).concat(e[4])), [['incident.opened', open.id, 'api', 'id,monitor,name,cause,failures'], ['incident.closed', open.id, 'api', 'id,monitor,name,cause,failures']], 'no URL or error text leaves the service');
   assert.deepEqual(t.service.stats(), { monitors: 1, up: 1, down: 0, degraded: 0, unknown: 0, paused: 0, openIncidents: 0, incidents24h: 1, openAlerts: 0, criticalAlerts: 0, notify: true });
   const up = t.service.uptime('api', 1);
   assert.deepEqual([up.checks, up.uptime, up.avgMs], [4, 25, 7]);

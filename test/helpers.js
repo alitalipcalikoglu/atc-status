@@ -39,18 +39,18 @@ export function scriptedChecker() {
   return c;
 }
 
-/** @param {Record<string, string>} [overrides] @param {{ now?: () => number, checker?: any, notifier?: any }} [o] */
+/** @param {Record<string, string>} [overrides] @param {{ now?: () => number, checker?: any, notifier?: any, publisher?: any }} [o] */
 export function testService(overrides, o = {}) {
   const config = Config.fromEnv(testEnv(overrides));
   const db = new Database(':memory:');
   const store = new StatusStore(db);
   const checker = o.checker ?? scriptedChecker();
-  const service = new StatusService({ config, store, checker, notifier: o.notifier ?? null, now: o.now });
+  const service = new StatusService({ config, store, checker, notifier: o.notifier ?? null, publisher: o.publisher, now: o.now });
   const alerts = new AlertService({ config, store, notifier: o.notifier ?? null, now: o.now });
   return { config, db, store, service, alerts, checker };
 }
 
-/** @param {Record<string, string>} [overrides] @param {object} [deps] @param {{ now?: () => number, checker?: any, notifier?: any }} [o] */
+/** @param {Record<string, string>} [overrides] @param {object} [deps] @param {{ now?: () => number, checker?: any, notifier?: any, publisher?: any }} [o] */
 export async function buildApp(overrides, deps = {}, o = {}) {
   const t = testService(overrides, o);
   const app = await new StatusApi({ ...t, version: readServiceVersion(import.meta.url), ...deps }).build();
