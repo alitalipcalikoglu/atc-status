@@ -7,5 +7,9 @@ With `AUDIT_URL` and `AUDIT_API_KEY` set, monitor changes are forwarded with out
 | `atc-status.monitor.upsert` | monitor | `created`, `settings` (the request body) |
 | `atc-status.monitor.delete` | monitor | – |
 | `atc-status.alert.ack` | alert | – |
+| `atc-status.incident.update` | incident | status |
+| `atc-status.maintenance.create` | maintenance | startsAt, endsAt |
+| `atc-status.maintenance.delete` | maintenance | – |
+| `atc-status.subscriber.delete` | subscriber | – |
 
 The actor is the API key id. Checks, check-now, incidents and reads are not audited (they are in the check and incident history).

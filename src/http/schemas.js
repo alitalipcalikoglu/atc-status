@@ -9,8 +9,9 @@ export class Schemas {
     properties: {
       name: { type: 'string', minLength: 1, maxLength: 100 },
       description: { type: 'string', maxLength: 500 },
-      kind: { type: 'string', enum: ['http', 'tcp', 'tls', 'heartbeat'] },
-      url: { type: 'string', minLength: 8, maxLength: 2_000, pattern: '^https?://' },
+      kind: { type: 'string', enum: ['http', 'tcp', 'tls', 'dns', 'heartbeat'] },
+      dnsType: { type: 'string', enum: ['A', 'AAAA', 'CNAME', 'MX', 'TXT', 'NS'] },
+      url: { type: 'string', minLength: 1, maxLength: 2_000, description: 'http/tcp/tls: an http(s) URL; dns: a host name.' },
       expectText: { type: ['string', 'null'], maxLength: 200 },
       warnDays: { type: 'integer', minimum: 1, maximum: 365 },
       graceSec: { type: 'integer', minimum: 0, maximum: 86_400 },
@@ -31,6 +32,20 @@ export class Schemas {
     type: 'object', additionalProperties: false,
     properties: { state: { type: 'string', enum: ['open', 'acked'] }, limit: { type: 'string', pattern: '^([1-9]|[1-9][0-9]|100)$' }, cursor: { type: 'string', pattern: '^[0-9]{1,15}~alr_[0-9a-z]{6,12}[0-9a-f]{16}$' } },
   };
+
+  static maintenanceId = { type: 'string', pattern: '^mnt_[0-9a-z]{6,12}[0-9a-f]{12}$' };
+  static maintenanceParams = { type: 'object', properties: { id: Schemas.maintenanceId }, required: ['id'] };
+  static createMaintenance = {
+    type: 'object', additionalProperties: false, required: ['title', 'startsAt', 'endsAt'],
+    properties: {
+      title: { type: 'string', minLength: 1, maxLength: 120 }, message: { type: 'string', maxLength: 1_000 },
+      monitors: { type: ['array', 'null'], maxItems: 100, items: Schemas.monitorId },
+      startsAt: { type: 'string', format: 'date-time' }, endsAt: { type: 'string', format: 'date-time' },
+    },
+  };
+  static incidentUpdate = { type: 'object', additionalProperties: false, required: ['status', 'message'], properties: { status: { type: 'string', enum: ['investigating', 'identified', 'monitoring', 'resolved'] }, message: { type: 'string', minLength: 1, maxLength: 2_000 } } };
+  static subscriberParams = { type: 'object', properties: { id: { type: 'string', pattern: '^sub_[0-9a-z]{6,12}[0-9a-f]{12}$' } }, required: ['id'] };
+  static tokenParams = { type: 'object', properties: { token: { type: 'string', pattern: '^[A-Za-z0-9_-]{20,64}$' } }, required: ['token'] };
 
   static monitorParams = { type: 'object', properties: { id: Schemas.monitorId }, required: ['id'] };
   static incidentParams = { type: 'object', properties: { id: Schemas.incidentId }, required: ['id'] };

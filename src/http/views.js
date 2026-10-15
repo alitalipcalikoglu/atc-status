@@ -12,7 +12,7 @@ export class Views {
   static monitor(m, s) {
     const day = s.uptime(m.id, 1);
     return {
-      id: m.id, kind: m.kind, name: m.name, description: m.description, url: m.kind === 'heartbeat' ? null : m.url, method: m.kind === 'http' ? m.method : null, expectText: m.expect_text, warnDays: m.warn_days, graceSec: m.grace_sec, lastPingAt: Views.iso(m.last_ping_at), intervalSec: Number(m.interval_sec), timeoutMs: Number(m.timeout_ms),
+      id: m.id, kind: m.kind, dnsType: m.dns_type ?? null, name: m.name, description: m.description, url: m.kind === 'heartbeat' ? null : m.url, method: m.kind === 'http' ? m.method : null, expectText: m.expect_text, warnDays: m.warn_days, graceSec: m.grace_sec, lastPingAt: Views.iso(m.last_ping_at), intervalSec: Number(m.interval_sec), timeoutMs: Number(m.timeout_ms),
       expectStatus: JSON.parse(m.expect_status), failThreshold: Number(m.fail_threshold), public: m.public === 1, paused: m.paused === 1, origin: m.origin,
       state: s.stateOf(m), consecutiveFailures: Number(m.consecutive_failures),
       lastCheck: m.last_check_at === null ? null : { at: Views.iso(m.last_check_at), ok: m.last_ok === 1, status: m.last_status, latencyMs: m.last_latency_ms, error: m.last_error },
@@ -32,6 +32,21 @@ export class Views {
       id: i.id, monitor: i.monitor, state: i.closed_at === null ? 'open' : 'closed', openedAt: Views.iso(i.opened_at), closedAt: Views.iso(i.closed_at),
       durationSec: Math.round(((i.closed_at ?? now) - i.opened_at) / 1000), cause: i.cause, lastError: i.last_error, failures: Number(i.failures), notifyError: i.notify_error,
     };
+  }
+
+  /** @param {import('../types.js').MaintenanceRow} w @param {number} now */
+  static maintenance(w, now) {
+    return { id: w.id, title: w.title, message: w.message, monitors: w.monitors === null ? null : JSON.parse(w.monitors), startsAt: Views.iso(w.starts_at), endsAt: Views.iso(w.ends_at), state: w.ends_at <= now ? 'ended' : w.starts_at <= now ? 'active' : 'planned', createdBy: w.created_by, createdAt: Views.iso(w.created_at) };
+  }
+
+  /** @param {import('../types.js').IncidentUpdateRow} u */
+  static update(u) {
+    return { at: Views.iso(u.at), status: u.status, message: u.message, by: u.by };
+  }
+
+  /** @param {import('../types.js').SubscriberRow} s */
+  static subscriber(s) {
+    return { id: s.id, email: s.email, confirmed: s.confirmed_at !== null, confirmedAt: Views.iso(s.confirmed_at), createdAt: Views.iso(s.created_at) };
   }
 
   /** @param {import('../types.js').AlertRow} a */

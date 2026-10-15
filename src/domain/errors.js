@@ -12,6 +12,9 @@ export class StatusError extends Error {
     INVALID_ARGUMENT: 400,
     TARGET_NOT_ALLOWED: 400,
     FORBIDDEN: 403,
+    MAINTENANCE_NOT_FOUND: 404,
+    SUBSCRIBER_NOT_FOUND: 404,
+    SUBSCRIPTIONS_DISABLED: 503,
   };
 
   /**

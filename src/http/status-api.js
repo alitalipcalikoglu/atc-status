@@ -13,6 +13,7 @@ import { AuditMetrics } from '../audit-metrics.js';
 /** @typedef {import('../config.js').Config} Config */
 /** @typedef {import('fastify').FastifyInstance} FastifyInstance */
 /** @typedef {import('fastify').FastifyRequest} FastifyRequest */
+/** @typedef {import('fastify').FastifyReply} FastifyReply */
 
 /**
  * HTTP surface. `/v1/*`: `read` sees monitors, checks, incidents and stats; `admin` changes
@@ -73,7 +74,7 @@ export class StatusApi {
       extra: () => ({ monitors: this.service.store.count(), checker: this.service.stopping.signal.aborted ? 'stopped' : 'running', notify: config.notify ? 'enabled' : 'disabled', alertHook: config.alertHookSecret ? 'enabled' : 'disabled' }),
     });
     registerOpenApi(app, new URL('../../openapi.yaml', import.meta.url));
-    registerInfo(app, { service: 'atc-status', version: this.version, capabilities: ['http-checks', 'tcp-tls-heartbeat-checks', 'incidents', 'alert-hub', 'email-alerts', 'public-status-page', 'seeded-monitors', 'ssrf-guard'], schemaVersion: this.db.schemaVersion });
+    registerInfo(app, { service: 'atc-status', version: this.version, capabilities: ['http-checks', 'tcp-tls-heartbeat-checks', 'dns-checks', 'maintenance-windows', 'incident-updates', ...(this.service.subscriptionsEnabled ? ['status-subscriptions'] : []), 'incidents', 'alert-hub', 'email-alerts', 'public-status-page', 'seeded-monitors', 'ssrf-guard'], schemaVersion: this.db.schemaVersion });
     this.#registerPublic(app);
     await app.register((hooks) => this.#registerHooks(hooks));
     await app.register((api) => this.#registerV1(api), { prefix: '/v1' });
@@ -85,6 +86,35 @@ export class StatusApi {
   async #registerHooks(hooks) {
     hooks.removeAllContentTypeParsers();
     hooks.addContentTypeParser('*', { parseAs: 'string' }, (_request, body, done) => done(null, body));
+    await hooks.register(rateLimit, { global: false, errorResponseBuilder: (_r, c) => Object.assign(new Error(`rate limit exceeded, retry in ${c.after}`), { statusCode: 429, code: 'RATE_LIMITED' }) });
+    const page = (/** @type {FastifyReply} */ reply, /** @type {number} */ code, /** @type {string} */ title, /** @type {string} */ text, /** @type {string} */ form = '') => reply.code(code).header('content-security-policy', StatusPage.CSP).header('cache-control', 'no-store').header('referrer-policy', 'no-referrer').type('text/html; charset=utf-8').send(StatusPage.message(this.config.page.title, title, text, form, `${this.config.page.publicUrl ?? ''}/status`));
+    const limited = { config: { rateLimit: { max: 10, timeWindow: '1 minute' } } };
+    const token = (/** @type {FastifyRequest} */ r) => /** @type {{ token: string }} */ (r.params).token;
+    const valid = (/** @type {string} */ t) => /^[A-Za-z0-9_-]{20,64}$/.test(t);
+    // Status page subscriptions: a form post, a confirmation link (a GET shows a button, the POST acts, so link scanners do nothing), an unsubscribe link.
+    hooks.post('/status/subscribe', limited, async (request, reply) => {
+      const email = new URLSearchParams(typeof request.body === 'string' ? request.body : '').get('email') ?? '';
+      try {
+        await this.service.subscribe(email);
+      } catch (err) {
+        const e = /** @type {StatusError} */ (err);
+        if (e.code === 'INVALID_ARGUMENT') return page(reply, 400, 'Not an e-mail address', 'Go back and check the address.');
+        if (e.code === 'SUBSCRIPTIONS_DISABLED') return page(reply, 404, 'Not available', 'Subscriptions are not offered here.');
+        if (e.code === 'LIMIT_EXCEEDED') return page(reply, 503, 'Not available right now', 'The subscriber list is full.');
+        throw err;
+      }
+      return page(reply, 200, 'Check your inbox', 'If the address can subscribe, a confirmation mail is on its way. Click the link in it to start getting updates.');
+    });
+    hooks.get('/status/subscribe/:token', limited, async (request, reply) => (valid(token(request)) ? page(reply, 200, 'Confirm your subscription', 'Get an e-mail when a service on this page goes down or recovers?', '<form method="post"><button type="submit">Confirm</button></form>') : page(reply, 404, 'Link not valid', 'This link is not valid.')));
+    hooks.post('/status/subscribe/:token', limited, async (request, reply) => {
+      try { if (!valid(token(request))) throw new StatusError('SUBSCRIBER_NOT_FOUND', 'bad token'); this.service.confirmSubscriber(token(request)); } catch (err) { if (/** @type {StatusError} */ (err).code === 'SUBSCRIBER_NOT_FOUND') return page(reply, 404, 'Link not valid', 'This link is not valid or was already used.'); throw err; }
+      return page(reply, 200, 'Subscribed', 'You will get an e-mail when a service on this page goes down or recovers. Every mail has an unsubscribe link.');
+    });
+    hooks.get('/status/unsubscribe/:token', limited, async (request, reply) => (valid(token(request)) ? page(reply, 200, 'Unsubscribe', 'Stop the status e-mails?', '<form method="post"><button type="submit">Unsubscribe</button></form>') : page(reply, 404, 'Link not valid', 'This link is not valid.')));
+    hooks.post('/status/unsubscribe/:token', limited, async (request, reply) => {
+      try { if (!valid(token(request))) throw new StatusError('SUBSCRIBER_NOT_FOUND', 'bad token'); this.service.unsubscribe(token(request)); } catch (err) { if (/** @type {StatusError} */ (err).code === 'SUBSCRIBER_NOT_FOUND') return page(reply, 404, 'Link not valid', 'This link is not valid or the address is no longer subscribed.'); throw err; }
+      return page(reply, 200, 'Unsubscribed', 'You will not get status e-mails any more.');
+    });
     hooks.post('/v1/hooks/webhook-out', async (request, reply) => {
       const raw = typeof request.body === 'string' ? request.body : '';
       const r = await this.alerts.receive(raw, /** @type {string|undefined} */ (request.headers['x-webhook-signature']));
@@ -174,8 +204,22 @@ export class StatusApi {
     api.get('/incidents/:id', { ...read, schema: { params: Schemas.incidentParams } }, async (request) => {
       const i = s.store.incident(mid(request));
       if (!i) throw new StatusError('INCIDENT_NOT_FOUND', `no incident "${mid(request)}"`);
-      return { incident: Views.incident(i, s.now()) };
+      return { incident: Views.incident(i, s.now()), updates: s.store.updates(i.id).map(Views.update) };
     });
+
+    api.post('/incidents/:id/updates', { config: { audit: AuditClient.route('atc-status.incident.update', (r) => ({ type: 'incident', id: mid(r) }), (r) => ({ status: /** @type {any} */ (r.body).status })) }, ...admin, schema: { params: Schemas.incidentParams, body: Schemas.incidentUpdate } }, async (request, reply) => {
+      const r = await s.updateIncident(mid(request), /** @type {any} */ (request.body), request.apiKey.id);
+      return reply.code(201).send({ incident: Views.incident(r.incident, s.now()), updates: r.updates.map(Views.update) });
+    });
+
+    // ---- maintenance windows
+    api.get('/maintenance', read, async () => { const r = s.listMaintenance(); const now = s.now(); return { current: r.current.map((w) => Views.maintenance(w, now)), past: r.past.map((w) => Views.maintenance(w, now)) }; });
+    api.post('/maintenance', { config: { audit: AuditClient.route('atc-status.maintenance.create', (_r, b) => ({ type: 'maintenance', id: b?.maintenance?.id ?? '' }), (r) => ({ startsAt: /** @type {any} */ (r.body).startsAt, endsAt: /** @type {any} */ (r.body).endsAt })) }, ...admin, schema: { body: Schemas.createMaintenance } }, async (request, reply) => reply.code(201).send({ maintenance: Views.maintenance(s.createMaintenance(/** @type {any} */ (request.body), request.apiKey.id), s.now()) }));
+    api.delete('/maintenance/:id', { config: { audit: AuditClient.route('atc-status.maintenance.delete', (r) => ({ type: 'maintenance', id: mid(r) })) }, ...admin, schema: { params: Schemas.maintenanceParams } }, async (request, reply) => { s.deleteMaintenance(mid(request)); return reply.code(204).send(); });
+
+    // ---- status page subscribers (addresses: admin keys only)
+    api.get('/subscribers', admin, async () => ({ items: s.store.subscribers(500).map(Views.subscriber), counts: s.store.subscriberCounts(), enabled: s.subscriptionsEnabled }));
+    api.delete('/subscribers/:id', { config: { audit: AuditClient.route('atc-status.subscriber.delete', (r) => ({ type: 'subscriber', id: mid(r) })) }, ...admin, schema: { params: Schemas.subscriberParams } }, async (request, reply) => { s.deleteSubscriber(mid(request)); return reply.code(204).send(); });
 
     api.get('/alerts', { ...read, schema: { querystring: Schemas.alertsQuery } }, async (request) => {
       const q = /** @type {{ state?: 'open'|'acked', limit?: string, cursor?: string }} */ (request.query);

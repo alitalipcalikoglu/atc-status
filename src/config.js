@@ -35,7 +35,16 @@ export class Config {
     this.alertDedupeMin = v.alertDedupeMin;
     this.limits = Object.freeze({ ...v.limits });
     this.page = Object.freeze({ ...v.page });
+    this.dnsServers = Object.freeze([...v.dnsServers]);
     Object.freeze(this);
+  }
+
+  /** Where the public status page is reachable; links in subscriber mails point here. @param {string} v */
+  static #publicUrl(v) {
+    if (!v) return null;
+    const u = v.replace(/\/+$/, '');
+    if (!/^https?:\/\/[^\s]+$/.test(u)) throw new ConfigError('STATUS_PUBLIC_URL must be an absolute http(s) URL');
+    return u;
   }
 
   /** @param {NodeJS.ProcessEnv} [env] @returns {Config} */
@@ -74,7 +83,10 @@ export class Config {
       page: {
         title: r.optional('STATUS_PAGE_TITLE') || 'Service status',
         cacheSec: r.integer('STATUS_PAGE_CACHE_SEC', 15, { min: 0, max: 3_600 }),
+        publicUrl: Config.#publicUrl(r.optional('STATUS_PUBLIC_URL')),
+        maxSubscribers: r.integer('MAX_SUBSCRIBERS', 2_000, { min: 0, max: 100_000 }),
       },
+      dnsServers: r.list('DNS_SERVERS'),
     });
   }
 

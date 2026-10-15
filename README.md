@@ -39,6 +39,13 @@ Tests and type check: `npm test`, `npm run typecheck`.
 | POST | `/v1/hooks/webhook-out` | signature | atc-webhook-out delivery; `ops.*` events become alerts |
 | GET | `/v1/alerts` | read | Operational alerts by state |
 | POST | `/v1/alerts/:id/ack` | admin | Acknowledge an alert |
+| POST | `/v1/incidents/:id/updates` | admin | Written update (`investigating`, `identified`, `monitoring`, `resolved`); `resolved` closes an open incident |
+| GET / POST | `/v1/maintenance` | read / admin | Maintenance windows; plan one |
+| DELETE | `/v1/maintenance/:id` | admin | End or cancel a window |
+| GET | `/v1/subscribers` | admin | Status page subscribers and totals |
+| DELETE | `/v1/subscribers/:id` | admin | Remove a subscriber |
+| POST | `/status/subscribe` | none | Subscription form of the public page (double opt-in) |
+| GET / POST | `/status/subscribe/:token`, `/status/unsubscribe/:token` | link | Confirm; leave the list (GET shows a button, POST acts) |
 | GET | `/v1/stats` | read | Monitors by state, open and recent incidents |
 
 Errors: `{ "error": { "code", "message" } }` — `VALIDATION_FAILED`, `INVALID_ARGUMENT`, `TARGET_NOT_ALLOWED` (400), `FORBIDDEN` (403), `MONITOR_NOT_FOUND`, `INCIDENT_NOT_FOUND`, `ALERT_NOT_FOUND`, `HOOK_DISABLED` (404), `INVALID_SIGNATURE` (401), `INVALID_STATE`, `LIMIT_EXCEEDED` (409), `RATE_LIMITED` (429). Full contract: [openapi.yaml](openapi.yaml).
@@ -58,6 +65,9 @@ Monitors, seeded monitors, incidents, alerts, the status page and the gateway ro
 | `MAX_MONITORS`, `MAX_CONCURRENT`, `TICK_MS` | `500`, `8`, `1000` | |
 | `CHECK_RETENTION_DAYS`, `INCIDENT_RETENTION_DAYS` | `14`, `365` | |
 | `STATUS_PAGE_TITLE`, `STATUS_PAGE_CACHE_SEC` | `Service status`, `15` | Public page |
+| `STATUS_PUBLIC_URL` | empty | Where the public page is reachable; with atc-notify configured it turns on e-mail subscriptions (links in mails point here) |
+| `MAX_SUBSCRIBERS` | `2000` | Subscriber list size (0 turns subscriptions off) |
+| `DNS_SERVERS` | empty | Resolvers for `dns` monitors, e.g. `1.1.1.1,8.8.8.8`; the system's when empty |
 | `NOTIFY_URL`, `NOTIFY_API_KEY`, `ALERT_EMAILS`, `ALERT_APP_NAME`, `NOTIFY_TIMEOUT_MS` | empty, empty, empty, `atc-web`, `10000` | Alerts (URL and key both or neither; recipients required with them) |
 | `HEARTBEAT_URL`, `HEARTBEAT_INTERVAL_SEC` | empty, `60` | Dead man's switch: this service GETs the URL on an interval (a healthchecks-style monitor on another host alerts when the pings stop) |
 | `ALERT_HOOK_SECRET`, `ALERT_DEDUPE_MIN` | empty, `15` | Signing secret (>= 32 chars) of the webhook-out subscription that delivers `ops.*` events; empty disables the hook. Repeats of one alert inside the window are counted, not mailed again |
@@ -88,8 +98,8 @@ test/                       node:test suites
 
 ## Out of scope by design
 
-- ICMP and DNS checks; keyword checks beyond the first KiB of a body; checks from several regions.
-- Maintenance windows, manual incident updates and subscriptions on the status page.
+- ICMP checks (raw sockets need extra privileges); keyword checks beyond the first KiB of a body; checks from several regions (needs a second host).
+- Subscriber channels other than e-mail (SMS, chat).
 - Alert channels other than e-mail.
 
 ## Events

@@ -23,6 +23,8 @@ tags:
   - name: monitors
   - name: incidents
   - name: alerts
+  - name: maintenance
+  - name: subscribers
   - name: public
   - name: stats
   - name: ops
@@ -128,7 +130,20 @@ paths:
                 required: [title, overall, updatedAt, monitors, incidents]
                 properties:
                   title: { type: string }
-                  overall: { type: string, enum: [operational, degraded, outage] }
+                  overall: { type: string, enum: [operational, degraded, outage, maintenance] }
+                  subscribe: { type: boolean, description: Whether the page offers e-mail subscriptions. }
+                  maintenance:
+                    type: array
+                    description: Active windows and those starting within 14 days that touch a public monitor.
+                    items:
+                      type: object
+                      properties:
+                        title: { type: string }
+                        message: { type: string }
+                        startsAt: { type: string, format: date-time }
+                        endsAt: { type: string, format: date-time }
+                        active: { type: boolean }
+                        monitors: { type: [array, "null"], items: { type: string }, description: Monitor names; null = everything. }
                   updatedAt: { type: string, format: date-time }
                   monitors:
                     type: array
@@ -150,6 +165,7 @@ paths:
                         openedAt: { type: string, format: date-time }
                         closedAt: { type: [string, "null"], format: date-time }
                         durationSec: { type: integer }
+                        updates: { type: array, items: { type: object, properties: { status: { type: string }, message: { type: string }, at: { type: string, format: date-time } } } }
 
   /v1/monitors:
     get:
@@ -285,10 +301,160 @@ paths:
       summary: One incident
       tags: [incidents]
       responses:
-        "200": { description: The incident., content: { application/json: { schema: { type: object, required: [incident], properties: { incident: { $ref: "#/components/schemas/Incident" } } } } } }
+        "200": { description: The incident and its written updates., content: { application/json: { schema: { type: object, required: [incident, updates], properties: { incident: { $ref: "#/components/schemas/Incident" }, updates: { type: array, items: { $ref: "#/components/schemas/IncidentUpdate" } } } } } } }
         "401": { $ref: "#/components/responses/Unauthorized" }
         "403": { $ref: "#/components/responses/Forbidden" }
         "404": { $ref: "#/components/responses/NotFound" }
+
+  /v1/incidents/{id}/updates:
+    parameters: [{ name: id, in: path, required: true, schema: { type: string, pattern: "^inc_[0-9a-z]{6,12}[0-9a-f]{16}$" } }]
+    post:
+      operationId: atc-status.incidents.addUpdate
+      summary: Post a written update on an incident (admin)
+      description: Shown on the public page under the incident. `resolved` on an open incident closes it (and sends the closing alert).
+      tags: [incidents]
+      requestBody: { required: true, content: { application/json: { schema: { type: object, additionalProperties: false, required: [status, message], properties: { status: { type: string, enum: [investigating, identified, monitoring, resolved] }, message: { type: string, minLength: 1, maxLength: 2000 } } } } } }
+      responses:
+        "201": { description: Posted., content: { application/json: { schema: { type: object, properties: { incident: { $ref: "#/components/schemas/Incident" }, updates: { type: array, items: { $ref: "#/components/schemas/IncidentUpdate" } } } } } } }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+
+  /v1/maintenance:
+    get:
+      operationId: atc-status.maintenance.list
+      summary: Maintenance windows (active and planned; past 30 days)
+      tags: [maintenance]
+      responses:
+        "200": { description: Windows., content: { application/json: { schema: { type: object, required: [current, past], properties: { current: { type: array, items: { $ref: "#/components/schemas/Maintenance" } }, past: { type: array, items: { $ref: "#/components/schemas/Maintenance" } } } } } } }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+    post:
+      operationId: atc-status.maintenance.create
+      summary: Plan a maintenance window (admin)
+      description: While active, failures of the listed monitors (all when `monitors` is empty or null) open no incident and send no alert; the public page shows the window and those monitors as in maintenance. At most 30 days long.
+      tags: [maintenance]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [title, startsAt, endsAt]
+              properties:
+                title: { type: string, minLength: 1, maxLength: 120 }
+                message: { type: string, maxLength: 1000 }
+                monitors: { type: [array, "null"], maxItems: 100, items: { type: string } }
+                startsAt: { type: string, format: date-time }
+                endsAt: { type: string, format: date-time }
+      responses:
+        "201": { description: Planned., content: { application/json: { schema: { type: object, properties: { maintenance: { $ref: "#/components/schemas/Maintenance" } } } } } }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+
+  /v1/maintenance/{id}:
+    parameters: [{ name: id, in: path, required: true, schema: { type: string, pattern: "^mnt_[0-9a-z]{6,12}[0-9a-f]{12}$" } }]
+    delete:
+      operationId: atc-status.maintenance.delete
+      summary: End or cancel a window (admin)
+      tags: [maintenance]
+      responses:
+        "204": { description: Removed. }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+
+  /v1/subscribers:
+    get:
+      operationId: atc-status.subscribers.list
+      summary: Status page subscribers (admin; contains addresses)
+      tags: [subscribers]
+      responses:
+        "200":
+          description: The newest 500 and the totals.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  enabled: { type: boolean }
+                  counts: { type: object, properties: { total: { type: integer }, confirmed: { type: integer } } }
+                  items: { type: array, items: { type: object, properties: { id: { type: string }, email: { type: string }, confirmed: { type: boolean }, confirmedAt: { type: [string, "null"], format: date-time }, createdAt: { type: string, format: date-time } } } }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+
+  /v1/subscribers/{id}:
+    parameters: [{ name: id, in: path, required: true, schema: { type: string, pattern: "^sub_[0-9a-z]{6,12}[0-9a-f]{12}$" } }]
+    delete:
+      operationId: atc-status.subscribers.delete
+      summary: Remove a subscriber (admin)
+      tags: [subscribers]
+      responses:
+        "204": { description: Removed. }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+
+  /status/subscribe:
+    post:
+      operationId: atc-status.page.subscribe
+      summary: Subscribe to the status page by e-mail (HTML form post)
+      description: Needs STATUS_PUBLIC_URL and atc-notify. Always the same answer for a valid address (no hint whether it was already subscribed); a confirmation mail goes out. Rate limited per address (10 per minute).
+      tags: [public]
+      security: []
+      x-stack-visibility: public
+      requestBody: { required: true, content: { application/x-www-form-urlencoded: { schema: { type: object, required: [email], properties: { email: { type: string } } } } } }
+      responses:
+        "200": { description: HTML page., content: { text/html: { schema: { type: string } } } }
+        "400": { description: HTML page; not an e-mail address., content: { text/html: { schema: { type: string } } } }
+        "404": { description: HTML page; subscriptions are off., content: { text/html: { schema: { type: string } } } }
+        "429": { description: Rate limited. }
+
+  /status/subscribe/{token}:
+    parameters: [{ name: token, in: path, required: true, schema: { type: string } }]
+    get:
+      operationId: atc-status.page.subscribeConfirmPage
+      summary: The confirmation link (shows a button; changes nothing)
+      tags: [public]
+      security: []
+      x-stack-visibility: public
+      responses:
+        "200": { description: HTML page with a form., content: { text/html: { schema: { type: string } } } }
+        "404": { description: HTML page; not a valid link., content: { text/html: { schema: { type: string } } } }
+    post:
+      operationId: atc-status.page.subscribeConfirm
+      summary: Confirm the subscription
+      tags: [public]
+      security: []
+      x-stack-visibility: public
+      responses:
+        "200": { description: HTML page., content: { text/html: { schema: { type: string } } } }
+        "404": { description: HTML page; not a valid link., content: { text/html: { schema: { type: string } } } }
+
+  /status/unsubscribe/{token}:
+    parameters: [{ name: token, in: path, required: true, schema: { type: string } }]
+    get:
+      operationId: atc-status.page.unsubscribePage
+      summary: The unsubscribe link in every mail (shows a button)
+      tags: [public]
+      security: []
+      x-stack-visibility: public
+      responses:
+        "200": { description: HTML page with a form., content: { text/html: { schema: { type: string } } } }
+        "404": { description: HTML page; not a valid link., content: { text/html: { schema: { type: string } } } }
+    post:
+      operationId: atc-status.page.unsubscribe
+      summary: Leave the list
+      tags: [public]
+      security: []
+      x-stack-visibility: public
+      responses:
+        "200": { description: HTML page., content: { text/html: { schema: { type: string } } } }
+        "404": { description: HTML page; not a valid link., content: { text/html: { schema: { type: string } } } }
 
   /v1/hooks/webhook-out:
     post:
@@ -409,17 +575,18 @@ components:
     MonitorSet: { description: Created (201) or updated (200)., content: { application/json: { schema: { type: object, required: [created, monitor], properties: { created: { type: boolean }, monitor: { $ref: "#/components/schemas/Monitor" }, pingToken: { type: string, description: "Heartbeat monitors on create or rotateToken, once." }, pingPath: { type: string, description: "`/v1/ping/{id}/{token}` for the same cases." } } } } } }
   schemas:
     ErrorEnvelope: { type: object, required: [error], properties: { error: { type: object, required: [code, message], properties: { code: { type: string }, message: { type: string }, details: {} } } } }
-    State: { type: string, enum: [up, down, degraded, unknown, paused], description: "`down` = open incident; `degraded` = last check failed, below the threshold." }
+    State: { type: string, enum: [up, down, degraded, unknown, paused, maintenance], description: "`down` = open incident; `degraded` = last check failed, below the threshold; `maintenance` = inside an active maintenance window." }
     MonitorSettings:
       type: object
       additionalProperties: false
       properties:
         name: { type: string, minLength: 1, maxLength: 100 }
         description: { type: string, maxLength: 500 }
-        kind: { type: string, enum: [http, tcp, tls, heartbeat], description: "Fixed at creation; default `http`. `tcp` and `tls` take an https URL with host and port as `url` (only host and port are used). `heartbeat` has no target: the monitored job pings `/v1/ping/{id}/{token}` within `intervalSec` plus `graceSec`." }
-        url: { type: string, minLength: 8, maxLength: 2000, pattern: "^https?://" }
+        kind: { type: string, enum: [http, tcp, tls, dns, heartbeat], description: "Fixed at creation; default `http`. `tcp` and `tls` take an https URL with host and port as `url` (only host and port are used). `dns` takes a host name as `url` and looks up `dnsType` records. `heartbeat` has no target: the monitored job pings `/v1/ping/{id}/{token}` within `intervalSec` plus `graceSec`." }
+        dnsType: { type: string, enum: [A, AAAA, CNAME, MX, TXT, NS], description: "dns only, default A." }
+        url: { type: string, minLength: 1, maxLength: 2000, description: "http/tcp/tls: an http(s) URL; dns: a host name such as example.com." }
         method: { type: string, enum: [GET, HEAD] }
-        expectText: { type: [string, "null"], maxLength: 200, description: "http with GET only: text the first KiB of the body must contain." }
+        expectText: { type: [string, "null"], maxLength: 200, description: "http with GET: text the first KiB of the body must contain; dns: text one of the records must contain (e.g. the expected address)." }
         warnDays: { type: integer, minimum: 1, maximum: 365, description: "tls only, default 14: fail when the certificate expires within this many days." }
         graceSec: { type: integer, minimum: 0, maximum: 86400, description: "heartbeat only, default 60: how late a ping may be." }
         rotateToken: { type: boolean, description: "heartbeat only: issue a new ping token (shown once in the response); the old one stops working." }
@@ -433,7 +600,8 @@ components:
       type: object
       properties:
         id: { type: string }
-        kind: { type: string, enum: [http, tcp, tls, heartbeat] }
+        kind: { type: string, enum: [http, tcp, tls, dns, heartbeat] }
+        dnsType: { type: [string, "null"], enum: [A, AAAA, CNAME, MX, TXT, NS, null] }
         name: { type: string }
         description: { type: string }
         url: { type: [string, "null"], description: "null for heartbeat monitors." }
@@ -484,6 +652,25 @@ components:
         ackedAt: { type: [string, "null"], format: date-time }
         ackedBy: { type: [string, "null"] }
         notifyError: { type: [string, "null"] }
+    Maintenance:
+      type: object
+      properties:
+        id: { type: string }
+        title: { type: string }
+        message: { type: string }
+        monitors: { type: [array, "null"], items: { type: string } }
+        startsAt: { type: string, format: date-time }
+        endsAt: { type: string, format: date-time }
+        state: { type: string, enum: [planned, active, ended] }
+        createdBy: { type: string }
+        createdAt: { type: string, format: date-time }
+    IncidentUpdate:
+      type: object
+      properties:
+        at: { type: string, format: date-time }
+        status: { type: string, enum: [investigating, identified, monitoring, resolved] }
+        message: { type: string }
+        by: { type: string }
     Incident:
       type: object
       properties:

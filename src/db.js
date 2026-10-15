@@ -8,8 +8,9 @@ export class Database extends CoreDatabase {
       id                   TEXT PRIMARY KEY,
       name                 TEXT NOT NULL,
       description          TEXT NOT NULL DEFAULT '',
-      -- http: a full check; tcp and tls: the target https://host:port (only host and port are used); heartbeat: pushed to us, no target.
-      kind                 TEXT NOT NULL DEFAULT 'http' CHECK (kind IN ('http', 'tcp', 'tls', 'heartbeat')),
+      -- http: a full check; tcp and tls: the target https://host:port (only host and port are used); dns: a host name; heartbeat: pushed to us, no target.
+      kind                 TEXT NOT NULL DEFAULT 'http' CHECK (kind IN ('http', 'tcp', 'tls', 'dns', 'heartbeat')),
+      dns_type             TEXT CHECK (dns_type IN ('A', 'AAAA', 'CNAME', 'MX', 'TXT', 'NS')),
       url                  TEXT NOT NULL,
       method               TEXT NOT NULL CHECK (method IN ('GET', 'HEAD')),
       expect_text          TEXT,
@@ -83,6 +84,42 @@ export class Database extends CoreDatabase {
     );
     CREATE INDEX alerts_open ON alerts (acked_at, last_at DESC);
     CREATE INDEX alerts_key ON alerts (type, dedupe_key, last_at DESC);
+
+    -- Planned maintenance: failures of the listed monitors (all when monitors IS NULL) open no
+    -- incident and send no alert while the window is active; the public page shows the window.
+    CREATE TABLE maintenance (
+      id          TEXT PRIMARY KEY,
+      title       TEXT NOT NULL,
+      message     TEXT NOT NULL DEFAULT '',
+      monitors    TEXT,
+      starts_at   INTEGER NOT NULL,
+      ends_at     INTEGER NOT NULL,
+      created_by  TEXT NOT NULL,
+      created_at  INTEGER NOT NULL
+    );
+    CREATE INDEX maintenance_window ON maintenance (ends_at, starts_at);
+
+    -- Written updates on an incident (what is known, what is being done), shown on the public page.
+    CREATE TABLE incident_updates (
+      seq       INTEGER PRIMARY KEY AUTOINCREMENT,
+      incident  TEXT NOT NULL REFERENCES incidents(id) ON DELETE CASCADE,
+      at        INTEGER NOT NULL,
+      status    TEXT NOT NULL CHECK (status IN ('investigating', 'identified', 'monitoring', 'resolved')),
+      message   TEXT NOT NULL,
+      by        TEXT NOT NULL
+    );
+    CREATE INDEX incident_updates_incident ON incident_updates (incident, seq);
+
+    -- Status page subscribers (double opt-in). The confirmation token is stored hashed; the
+    -- unsubscribe token only allows leaving the list and stays the same in every mail.
+    CREATE TABLE subscribers (
+      id            TEXT PRIMARY KEY,
+      email         TEXT NOT NULL UNIQUE,
+      token_hash    TEXT NOT NULL UNIQUE,
+      unsub_token   TEXT NOT NULL UNIQUE,
+      confirmed_at  INTEGER,
+      created_at    INTEGER NOT NULL
+    );
     `,
   ];
 }

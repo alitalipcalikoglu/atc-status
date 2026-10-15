@@ -57,7 +57,8 @@
  * @property {string|null} alertHookSecret  Signing secret of the webhook-out subscription that delivers ops.* events; null = hook disabled.
  * @property {number} alertDedupeMin  Repeats of the same alert inside this window raise a counter instead of another e-mail.
  * @property {Limits} limits
- * @property {{ title: string, cacheSec: number }} page
+ * @property {{ title: string, cacheSec: number, publicUrl: string|null, maxSubscribers: number }} page
+ * @property {string[]} dnsServers
  */
 
 /**
@@ -65,10 +66,11 @@
  * @property {string} id
  * @property {string} name
  * @property {string} description
- * @property {'http'|'tcp'|'tls'|'heartbeat'} kind
+ * @property {'http'|'tcp'|'tls'|'dns'|'heartbeat'} kind
+ * @property {'A'|'AAAA'|'CNAME'|'MX'|'TXT'|'NS'|null} [dns_type]  dns only: the record type looked up.
  * @property {string} url              http: the URL; tcp and tls: https://host:port; heartbeat: empty.
  * @property {'GET'|'HEAD'} method
- * @property {string|null} expect_text  http only: text the first KiB of the body must contain.
+ * @property {string|null} expect_text  http: text the first KiB of the body must contain; dns: text one of the records must contain.
  * @property {number|null} warn_days    tls only: fail when the certificate expires within this many days.
  * @property {number|null} grace_sec    heartbeat only: how late a ping may be after its interval.
  * @property {string|null} ping_hash    heartbeat only: SHA-256 of the ping token.
@@ -138,3 +140,35 @@
 /** @typedef {import('fastify').FastifyBaseLogger} Logger */
 
 export {};
+
+/**
+ * @typedef {object} MaintenanceRow
+ * @property {string} id
+ * @property {string} title
+ * @property {string} message
+ * @property {string|null} monitors   JSON array of monitor ids; null = every monitor.
+ * @property {number} starts_at
+ * @property {number} ends_at
+ * @property {string} created_by
+ * @property {number} created_at
+ */
+
+/**
+ * @typedef {object} IncidentUpdateRow
+ * @property {number} seq
+ * @property {string} incident
+ * @property {number} at
+ * @property {'investigating'|'identified'|'monitoring'|'resolved'} status
+ * @property {string} message
+ * @property {string} by
+ */
+
+/**
+ * @typedef {object} SubscriberRow
+ * @property {string} id
+ * @property {string} email
+ * @property {string} token_hash
+ * @property {string} unsub_token
+ * @property {number|null} confirmed_at
+ * @property {number} created_at
+ */

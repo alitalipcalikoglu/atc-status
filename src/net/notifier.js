@@ -73,6 +73,44 @@ export class Notifier {
     if (!res.ok) throw new Error(await Notifier.#reason(res));
   }
 
+  /** @param {string} to @param {string} confirmUrl @param {string} pageTitle */
+  async subscriberConfirm(to, confirmUrl, pageTitle) {
+    await this.#generic(to, null, {
+      subject: `Confirm your subscription to ${pageTitle}`.slice(0, 200),
+      title: 'Confirm your subscription',
+      paragraphs: [`Someone (hopefully you) asked to get an e-mail when something on "${pageTitle}" goes down or recovers.`, 'If that was not you, ignore this message; nothing happens without the click.'],
+      button: { label: 'Confirm subscription', url: confirmUrl },
+    });
+  }
+
+  /**
+   * @param {'opened'|'closed'} event @param {import('../types.js').IncidentRow} incident @param {import('../types.js').MonitorRow} monitor
+   * @param {string} to @param {string} unsubscribeUrl @param {string} pageTitle
+   */
+  async subscriberIncident(event, incident, monitor, to, unsubscribeUrl, pageTitle) {
+    const opened = event === 'opened';
+    await this.#generic(to, `atc-status:${incident.id}:${event}:${to}`, {
+      subject: `${opened ? 'Outage' : 'Resolved'}: ${monitor.name}`.slice(0, 200),
+      title: opened ? `${monitor.name} is having problems` : `${monitor.name} is working again`,
+      paragraphs: [
+        opened ? `We noticed a problem with ${monitor.name} at ${new Date(incident.opened_at).toISOString().replace('T', ' ').slice(0, 16)} UTC and are looking into it.` : `${monitor.name} recovered at ${new Date(/** @type {number} */ (incident.closed_at)).toISOString().replace('T', ' ').slice(0, 16)} UTC.`,
+        `You get this because you subscribed to ${pageTitle}. Unsubscribe: ${unsubscribeUrl}`,
+      ],
+    });
+  }
+
+  /** @param {string} to @param {string|null} idempotencyKey @param {Record<string, unknown>} data */
+  async #generic(to, idempotencyKey, data) {
+    const res = await this.fetch(`${this.target.url}/v1/messages`, {
+      method: 'POST',
+      headers: { authorization: `Bearer ${this.target.apiKey}`, 'content-type': 'application/json' },
+      redirect: 'error',
+      signal: AbortSignal.timeout(this.target.timeoutMs),
+      body: JSON.stringify({ channel: 'email', template: 'generic', to: [to], ...(idempotencyKey ? { idempotencyKey: idempotencyKey.slice(0, 128) } : {}), data: { locale: 'en', appName: this.target.appName, ...data } }),
+    });
+    if (!res.ok) throw new Error(await Notifier.#reason(res));
+  }
+
   /** @param {Response} res */
   static async #reason(res) {
     const text = await res.text().catch(() => '');

@@ -1,3 +1,4 @@
+import { Resolver } from 'node:dns/promises';
 import { connect as netConnect } from 'node:net';
 import { connect as tlsConnect } from 'node:tls';
 import { CallError, HttpCaller, NetGuard } from '@atc-web/atc-service-core/http';
@@ -10,6 +11,7 @@ import { CallError, HttpCaller, NetGuard } from '@atc-web/atc-service-core/http'
  * - `http`: a request; the status must be expected and, with `expect_text`, the first KiB of the body must contain the text.
  * - `tcp`: the port accepts a connection.
  * - `tls`: the handshake succeeds with a valid certificate that does not expire within `warn_days`.
+ * - `dns`: the name resolves to at least one record of the type; with `expect_text`, one record must contain it.
  * - `heartbeat`: a ping arrived within interval plus grace (nothing is contacted).
  * Targets of monitors created through the API pass the SSRF guard (TARGET_* rules); monitors seeded
  * from MONITOR_SEEDS are operator configuration and may reach private addresses. The vetted address is
@@ -25,9 +27,11 @@ export class Checker {
    * @param {NetGuard} [o.trusted] For seeded monitors.
    * @param {(target: any, method: string, headers: Record<string, string>, body: string, timeoutMs: number, label?: string) => Promise<{ httpStatus: number, response?: string }>} [o.send]
    * @param {import('node:tls').ConnectionOptions} [o.tlsOptions]  Extra TLS options (tests pass a private CA).
+   * @param {string[]} [o.dnsServers]  Resolvers for dns monitors (DNS_SERVERS); the system's when empty.
    * @param {() => number} [o.now]
    */
-  constructor({ guard, trusted = new NetGuard({ allowHttp: true, allowPrivate: true }), send = HttpCaller.send, tlsOptions = {}, now = Date.now }) {
+  constructor({ guard, trusted = new NetGuard({ allowHttp: true, allowPrivate: true }), send = HttpCaller.send, tlsOptions = {}, dnsServers = [], now = Date.now }) {
+    this.dnsServers = dnsServers;
     this.guard = guard;
     this.trusted = trusted;
     this.send = send;
@@ -41,6 +45,7 @@ export class Checker {
     /** @type {{ ok: boolean, status: number|null, error: string|null }} */
     let r;
     if (m.kind === 'heartbeat') r = this.#heartbeat(m);
+    else if (m.kind === 'dns') r = await this.#dns(m);
     else {
       /** @type {NodeJS.Timeout|undefined} */ let timer;
       try {
@@ -62,6 +67,24 @@ export class Checker {
     const late = this.now() - since - (m.interval_sec + (m.grace_sec ?? 0)) * 1000;
     if (late <= 0) return { ok: true, status: null, error: null };
     return { ok: false, status: null, error: m.last_ping_at === null ? 'no ping received yet' : `no ping for ${Math.round((this.now() - since) / 1000)}s (expected every ${m.interval_sec}s)` };
+  }
+
+  /** A lookup only: no connection to the target, so the SSRF guard does not apply. @param {MonitorRow} m */
+  async #dns(m) {
+    const resolver = new Resolver({ timeout: m.timeout_ms, tries: 1 });
+    if (this.dnsServers.length) resolver.setServers(this.dnsServers);
+    const type = m.dns_type ?? 'A';
+    try {
+      const raw = /** @type {unknown[]} */ (await resolver.resolve(m.url, type));
+      const records = raw.map((x) => (typeof x === 'string' ? x : Array.isArray(x) ? x.join('') : typeof x === 'object' && x && 'exchange' in x ? String(/** @type {any} */ (x).exchange) : JSON.stringify(x)));
+      if (!records.length) return { ok: false, status: null, error: `no ${type} records` };
+      if (m.expect_text && !records.some((r) => r.includes(/** @type {string} */ (m.expect_text)))) return { ok: false, status: null, error: `no ${type} record contains the expected text (got ${records.slice(0, 3).join(', ').slice(0, 200)})` };
+      return { ok: true, status: null, error: null };
+    } catch (err) {
+      return { ok: false, status: null, error: `${type} lookup failed: ${/** @type {NodeJS.ErrnoException} */ (err).code ?? /** @type {Error} */ (err).message}`.slice(0, 300) };
+    } finally {
+      resolver.cancel();
+    }
   }
 
   /** @param {import('@atc-web/atc-service-core/http').VettedTarget} vetted @param {MonitorRow} m */

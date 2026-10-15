@@ -8,6 +8,8 @@ Scenario-driven walkthroughs of every feature. Requests to `/v1/*` need `Authori
 | [Monitor kinds](monitor-kinds.md) | Keyword, TCP and TLS-expiry checks, heartbeats for cron jobs, the dead man's switch |
 | [Seeded monitors](seeded-monitors.md) | `/health` and `/ready` of every service from `MONITOR_SEEDS` |
 | [Incidents](incidents.md) | When incidents open and close, browsing them |
+| [Maintenance and incident updates](maintenance-and-updates.md) | Planned windows that open no incident, written updates on the public page |
+| [Subscriptions](subscriptions.md) | E-mail subscriptions to the public page: double opt-in, unsubscribe, administration |
 | [Alerts](alerts.md) | E-mails through atc-notify when an incident opens and closes |
 | [Operational alerts](operational-alerts.md) | `ops.*` events from webhook-out become alerts: dedupe, e-mail, acknowledge |
 | [Events](events.md) | `incident.opened` and `incident.closed` through atc-webhook-out |

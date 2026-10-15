@@ -1,3 +1,5 @@
+import { randomBytes } from 'node:crypto';
+
 /** @typedef {import('../types.js').MonitorRow} MonitorRow */
 /** @typedef {import('../types.js').CheckRow} CheckRow */
 /** @typedef {import('../types.js').IncidentRow} IncidentRow */
@@ -12,9 +14,9 @@ export class StatusStore {
       monitor: raw.prepare('SELECT * FROM monitors WHERE id = ?'),
       monitors: raw.prepare('SELECT * FROM monitors ORDER BY id'),
       count: raw.prepare('SELECT COUNT(*) AS n FROM monitors'),
-      insert: raw.prepare(`INSERT INTO monitors (id, name, description, kind, url, method, expect_text, warn_days, grace_sec, ping_hash, interval_sec, timeout_ms, expect_status, fail_threshold, public, paused, origin, next_at, created_by, created_at, updated_at)
-        VALUES (:id, :name, :description, :kind, :url, :method, :expect_text, :warn_days, :grace_sec, :ping_hash, :interval_sec, :timeout_ms, :expect_status, :fail_threshold, :public, :paused, :origin, :next_at, :created_by, :created_at, :updated_at)`),
-      update: raw.prepare(`UPDATE monitors SET name = :name, description = :description, url = :url, method = :method, expect_text = :expect_text, warn_days = :warn_days, grace_sec = :grace_sec, ping_hash = :ping_hash, interval_sec = :interval_sec, timeout_ms = :timeout_ms,
+      insert: raw.prepare(`INSERT INTO monitors (id, name, description, kind, dns_type, url, method, expect_text, warn_days, grace_sec, ping_hash, interval_sec, timeout_ms, expect_status, fail_threshold, public, paused, origin, next_at, created_by, created_at, updated_at)
+        VALUES (:id, :name, :description, :kind, :dns_type, :url, :method, :expect_text, :warn_days, :grace_sec, :ping_hash, :interval_sec, :timeout_ms, :expect_status, :fail_threshold, :public, :paused, :origin, :next_at, :created_by, :created_at, :updated_at)`),
+      update: raw.prepare(`UPDATE monitors SET name = :name, description = :description, dns_type = :dns_type, url = :url, method = :method, expect_text = :expect_text, warn_days = :warn_days, grace_sec = :grace_sec, ping_hash = :ping_hash, interval_sec = :interval_sec, timeout_ms = :timeout_ms,
         expect_status = :expect_status, fail_threshold = :fail_threshold, public = :public, paused = :paused, next_at = :next_at, updated_at = :updated_at WHERE id = :id`),
       delete: raw.prepare('DELETE FROM monitors WHERE id = ?'),
       ping: raw.prepare('UPDATE monitors SET last_ping_at = ? WHERE id = ?'),
@@ -42,6 +44,25 @@ export class StatusStore {
       alertOpen: raw.prepare('SELECT COUNT(*) AS n, SUM(CASE WHEN severity = \'critical\' THEN 1 ELSE 0 END) AS critical FROM alerts WHERE acked_at IS NULL'),
       alertPrune: raw.prepare('DELETE FROM alerts WHERE acked_at IS NOT NULL AND acked_at < ?'),
       since: raw.prepare('SELECT COUNT(*) AS n FROM incidents WHERE opened_at >= ?'),
+      maintInsert: raw.prepare('INSERT INTO maintenance (id, title, message, monitors, starts_at, ends_at, created_by, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)'),
+      maintGet: raw.prepare('SELECT * FROM maintenance WHERE id = ?'),
+      maintDelete: raw.prepare('DELETE FROM maintenance WHERE id = ?'),
+      maintCurrent: raw.prepare('SELECT * FROM maintenance WHERE ends_at > ? ORDER BY starts_at, id'),
+      maintRecent: raw.prepare('SELECT * FROM maintenance WHERE ends_at > ? ORDER BY starts_at DESC, id LIMIT ?'),
+      maintPrune: raw.prepare('DELETE FROM maintenance WHERE ends_at < ?'),
+      updInsert: raw.prepare('INSERT INTO incident_updates (incident, at, status, message, by) VALUES (?, ?, ?, ?, ?)'),
+      updOf: raw.prepare('SELECT * FROM incident_updates WHERE incident = ? ORDER BY seq'),
+      subByEmail: raw.prepare('SELECT * FROM subscribers WHERE email = ?'),
+      subByToken: raw.prepare('SELECT * FROM subscribers WHERE token_hash = ?'),
+      subInsert: raw.prepare('INSERT INTO subscribers (id, email, token_hash, unsub_token, confirmed_at, created_at) VALUES (?, ?, ?, ?, NULL, ?)'),
+      subByUnsub: raw.prepare('SELECT * FROM subscribers WHERE unsub_token = ?'),
+      subToken: raw.prepare('UPDATE subscribers SET token_hash = ? WHERE id = ?'),
+      subConfirm: raw.prepare('UPDATE subscribers SET confirmed_at = ? WHERE id = ? AND confirmed_at IS NULL'),
+      subDelete: raw.prepare('DELETE FROM subscribers WHERE id = ?'),
+      subConfirmed: raw.prepare('SELECT * FROM subscribers WHERE confirmed_at IS NOT NULL ORDER BY created_at'),
+      subAll: raw.prepare('SELECT * FROM subscribers ORDER BY created_at DESC, id DESC LIMIT ?'),
+      subCount: raw.prepare('SELECT COUNT(*) AS n, SUM(CASE WHEN confirmed_at IS NOT NULL THEN 1 ELSE 0 END) AS confirmed FROM subscribers'),
+      subPrune: raw.prepare('DELETE FROM subscribers WHERE confirmed_at IS NULL AND created_at < ?'),
     };
   }
 
@@ -51,9 +72,9 @@ export class StatusStore {
   monitors() { return /** @type {any} */ (this.stmt.monitors.all()); }
   count() { return Number(this.stmt.count.get()?.n ?? 0); }
   /** @param {MonitorRow} m */
-  insert(m) { this.stmt.insert.run(/** @type {any} */ (StatusStore.#named({ ...m, kind: m.kind ?? 'http' }, ['id', 'name', 'description', 'kind', 'url', 'method', 'expect_text', 'warn_days', 'grace_sec', 'ping_hash', 'interval_sec', 'timeout_ms', 'expect_status', 'fail_threshold', 'public', 'paused', 'origin', 'next_at', 'created_by', 'created_at', 'updated_at']))); }
+  insert(m) { this.stmt.insert.run(/** @type {any} */ (StatusStore.#named({ ...m, kind: m.kind ?? 'http' }, ['id', 'name', 'description', 'kind', 'dns_type', 'url', 'method', 'expect_text', 'warn_days', 'grace_sec', 'ping_hash', 'interval_sec', 'timeout_ms', 'expect_status', 'fail_threshold', 'public', 'paused', 'origin', 'next_at', 'created_by', 'created_at', 'updated_at']))); }
   /** @param {MonitorRow} m */
-  update(m) { this.stmt.update.run(/** @type {any} */ (StatusStore.#named(m, ['id', 'name', 'description', 'url', 'method', 'expect_text', 'warn_days', 'grace_sec', 'ping_hash', 'interval_sec', 'timeout_ms', 'expect_status', 'fail_threshold', 'public', 'paused', 'next_at', 'updated_at']))); }
+  update(m) { this.stmt.update.run(/** @type {any} */ (StatusStore.#named(m, ['id', 'name', 'description', 'dns_type', 'url', 'method', 'expect_text', 'warn_days', 'grace_sec', 'ping_hash', 'interval_sec', 'timeout_ms', 'expect_status', 'fail_threshold', 'public', 'paused', 'next_at', 'updated_at']))); }
   /** @param {string} id */
   delete(id) { this.stmt.delete.run(id); }
   /** @param {string} id @param {number} at */
@@ -157,6 +178,44 @@ export class StatusStore {
     // Dynamic WHERE: prepared per call, never cached.
     return /** @type {any} */ (this.raw.prepare(`SELECT * FROM incidents ${where.length ? `WHERE ${where.join(' AND ')}` : ''} ORDER BY opened_at DESC, id DESC LIMIT ?`).all(...args, q.limit));
   }
+
+  /** @param {import('../types.js').MaintenanceRow} m */
+  maintInsert(m) { this.stmt.maintInsert.run(m.id, m.title, m.message, m.monitors, m.starts_at, m.ends_at, m.created_by, m.created_at); }
+  /** @param {string} id @returns {import('../types.js').MaintenanceRow|undefined} */
+  maint(id) { return /** @type {any} */ (this.stmt.maintGet.get(id)); }
+  /** @param {string} id */
+  maintDelete(id) { return Number(this.stmt.maintDelete.run(id).changes) === 1; }
+  /** Windows that have not ended yet (active and upcoming). @param {number} now @returns {import('../types.js').MaintenanceRow[]} */
+  maintCurrent(now) { return /** @type {any} */ (this.stmt.maintCurrent.all(now)); }
+  /** @param {number} since @param {number} limit @returns {import('../types.js').MaintenanceRow[]} */
+  maintRecent(since, limit) { return /** @type {any} */ (this.stmt.maintRecent.all(since, limit)); }
+  /** @param {number} cutoff */
+  maintPrune(cutoff) { return Number(this.stmt.maintPrune.run(cutoff).changes); }
+  /** @param {string} incident @param {number} at @param {string} status @param {string} message @param {string} by */
+  addUpdate(incident, at, status, message, by) { this.stmt.updInsert.run(incident, at, status, message, by); }
+  /** @param {string} incident @returns {import('../types.js').IncidentUpdateRow[]} */
+  updates(incident) { return /** @type {any} */ (this.stmt.updOf.all(incident)); }
+  /** @param {string} email @returns {import('../types.js').SubscriberRow|undefined} */
+  subscriberByEmail(email) { return /** @type {any} */ (this.stmt.subByEmail.get(email)); }
+  /** @param {string} hash @returns {import('../types.js').SubscriberRow|undefined} */
+  subscriberByToken(hash) { return /** @type {any} */ (this.stmt.subByToken.get(hash)); }
+  /** @param {string} id @param {string} email @param {string} hash @param {number} at */
+  subscriberInsert(id, email, hash, at) { this.stmt.subInsert.run(id, email, hash, randomBytes(24).toString('base64url'), at); }
+  /** @param {string} token @returns {import('../types.js').SubscriberRow|undefined} */
+  subscriberByUnsub(token) { return /** @type {any} */ (this.stmt.subByUnsub.get(token)); }
+  /** @param {string} id @param {string} hash */
+  subscriberToken(id, hash) { this.stmt.subToken.run(hash, id); }
+  /** @param {string} id @param {number} at */
+  subscriberConfirm(id, at) { return Number(this.stmt.subConfirm.run(at, id).changes) === 1; }
+  /** @param {string} id */
+  subscriberDelete(id) { return Number(this.stmt.subDelete.run(id).changes) === 1; }
+  /** @returns {import('../types.js').SubscriberRow[]} */
+  subscribersConfirmed() { return /** @type {any} */ (this.stmt.subConfirmed.all()); }
+  /** @param {number} limit @returns {import('../types.js').SubscriberRow[]} */
+  subscribers(limit) { return /** @type {any} */ (this.stmt.subAll.all(limit)); }
+  subscriberCounts() { const r = this.stmt.subCount.get(); return { total: Number(r?.n ?? 0), confirmed: Number(r?.confirmed ?? 0) }; }
+  /** Unconfirmed sign-ups older than the cutoff. @param {number} cutoff */
+  subscribersPrune(cutoff) { return Number(this.stmt.subPrune.run(cutoff).changes); }
 
   /** @param {Record<string, any>} o @param {string[]} keys */
   static #named(o, keys) {

@@ -63,3 +63,13 @@ The service GETs that URL on start and then on the interval; failures are logged
 Pitfalls:
 - `tcp`, `tls` and `heartbeat` monitors have no `method`, `expectStatus` or (heartbeat) `url`; sending them is `400 INVALID_ARGUMENT`.
 - A heartbeat interval shorter than the job's real period raises false incidents; add the job's run time to `graceSec`.
+
+## DNS: a name resolves (to the right thing)
+
+```bash
+curl -s -X PUT $STATUS/v1/monitors/dns-shop -H "Authorization: Bearer $ADMIN" -H 'Content-Type: application/json' \
+  -d '{"kind":"dns","url":"shop.example.com","dnsType":"A","expectText":"203.0.113.7","intervalSec":300}'
+```
+
+`url` is a host name here. The check looks up `dnsType` (`A`, `AAAA`, `CNAME`, `MX`, `TXT`, `NS`; default `A`) and passes when there is at least one record and, with `expectText`, one record contains that text — the expected address, a CNAME target or a TXT verification string. Failures read like `A lookup failed: ENOTFOUND` or `no A record contains the expected text (got 198.51.100.1)`. Set `DNS_SERVERS` to ask specific resolvers instead of the system's. Only a lookup is made, so the SSRF guard does not apply to dns monitors.
+

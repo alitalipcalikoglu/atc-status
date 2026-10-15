@@ -27,7 +27,7 @@ export class Application {
     this.store = new StatusStore(this.db);
     this.service = new StatusService({
       config, store: this.store,
-      checker: new Checker({ guard: new NetGuard(config.target) }),
+      checker: new Checker({ guard: new NetGuard(config.target), dnsServers: [...config.dnsServers] }),
       notifier: config.notify ? new Notifier(config.notify) : null,
       publisher: this.publisher,
     });
