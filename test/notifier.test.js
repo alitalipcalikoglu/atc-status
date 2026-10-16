@@ -10,7 +10,7 @@ test('notifier: generic e-mail per incident event with an idempotency key; error
   const monitor = /** @type {any} */ ({ id: 'shop', name: 'Shop' });
   await n.incident('opened', { ...incident, closed_at: null }, monitor);
   await n.incident('closed', incident, monitor);
-  assert.deepEqual(calls.map((c) => [c.url, c.init.headers.authorization, c.body.channel, c.body.template, c.body.to, c.body.idempotencyKey, c.body.data.subject]), [
+  assert.deepEqual(calls.map((c) => [c.url, c.init.headers.authorization, c.body.channel, c.body.template, c.body.to, c.init.headers['idempotency-key'], c.body.data.subject]), [
     ['http://notify.test/v1/messages', `Bearer ${'n'.repeat(40)}`, 'email', 'generic', ['ops@example.com'], 'atc-status:inc_x:opened', 'DOWN: Shop'],
     ['http://notify.test/v1/messages', `Bearer ${'n'.repeat(40)}`, 'email', 'generic', ['ops@example.com'], 'atc-status:inc_x:closed', 'RECOVERED: Shop'],
   ]);

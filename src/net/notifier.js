@@ -1,3 +1,4 @@
+import { createHash } from 'node:crypto';
 /**
  * Incident e-mails through atc-notify's `generic` template. Idempotent per incident and event, so
  * a repeated send never mails twice.
@@ -22,14 +23,13 @@ export class Notifier {
     const downFor = incident.closed_at ? Notifier.duration(incident.closed_at - incident.opened_at) : null;
     const res = await this.fetch(`${this.target.url}/v1/messages`, {
       method: 'POST',
-      headers: { authorization: `Bearer ${this.target.apiKey}`, 'content-type': 'application/json' },
+      headers: { authorization: `Bearer ${this.target.apiKey}`, 'content-type': 'application/json', 'idempotency-key': `atc-status:${incident.id}:${event}` },
       redirect: 'error',
       signal: AbortSignal.timeout(this.target.timeoutMs),
       body: JSON.stringify({
         channel: 'email',
         template: 'generic',
         to: this.target.to,
-        idempotencyKey: `atc-status:${incident.id}:${event}`,
         data: {
           locale: 'en',
           appName: this.target.appName,
@@ -53,14 +53,13 @@ export class Notifier {
   async alert(alert) {
     const res = await this.fetch(`${this.target.url}/v1/messages`, {
       method: 'POST',
-      headers: { authorization: `Bearer ${this.target.apiKey}`, 'content-type': 'application/json' },
+      headers: { authorization: `Bearer ${this.target.apiKey}`, 'content-type': 'application/json', 'idempotency-key': `atc-status:${alert.id}` },
       redirect: 'error',
       signal: AbortSignal.timeout(this.target.timeoutMs),
       body: JSON.stringify({
         channel: 'email',
         template: 'generic',
         to: this.target.to,
-        idempotencyKey: `atc-status:${alert.id}`,
         data: {
           locale: 'en',
           appName: this.target.appName,
@@ -89,7 +88,8 @@ export class Notifier {
    */
   async subscriberIncident(event, incident, monitor, to, unsubscribeUrl, pageTitle) {
     const opened = event === 'opened';
-    await this.#generic(to, `atc-status:${incident.id}:${event}:${to}`, {
+    // Idempotency-Key allows only A-Z a-z 0-9 . _ : - ; the address goes in as a hash.
+    await this.#generic(to, `atc-status:${incident.id}:${event}:${createHash('sha256').update(to).digest('hex').slice(0, 16)}`, {
       subject: `${opened ? 'Outage' : 'Resolved'}: ${monitor.name}`.slice(0, 200),
       title: opened ? `${monitor.name} is having problems` : `${monitor.name} is working again`,
       paragraphs: [
@@ -103,10 +103,10 @@ export class Notifier {
   async #generic(to, idempotencyKey, data) {
     const res = await this.fetch(`${this.target.url}/v1/messages`, {
       method: 'POST',
-      headers: { authorization: `Bearer ${this.target.apiKey}`, 'content-type': 'application/json' },
+      headers: { authorization: `Bearer ${this.target.apiKey}`, 'content-type': 'application/json', ...(idempotencyKey ? { 'idempotency-key': idempotencyKey.slice(0, 255) } : {}) },
       redirect: 'error',
       signal: AbortSignal.timeout(this.target.timeoutMs),
-      body: JSON.stringify({ channel: 'email', template: 'generic', to: [to], ...(idempotencyKey ? { idempotencyKey: idempotencyKey.slice(0, 128) } : {}), data: { locale: 'en', appName: this.target.appName, ...data } }),
+      body: JSON.stringify({ channel: 'email', template: 'generic', to: [to], data: { locale: 'en', appName: this.target.appName, ...data } }),
     });
     if (!res.ok) throw new Error(await Notifier.#reason(res));
   }
