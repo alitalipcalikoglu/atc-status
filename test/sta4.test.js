@@ -77,7 +77,7 @@ test('incident updates: written updates appear on the public page; resolved clos
     subscriberConfirm: async (/** @type {string} */ to, /** @type {string} */ link) => { mails.push(`confirm:${to}:${link}`); },
     subscriberIncident: async (/** @type {string} */ ev, /** @type {any} */ _i, /** @type {any} */ _m, /** @type {string} */ to, /** @type {string} */ unsub) => { mails.push(`sub:${ev}:${to}:${unsub}`); },
   };
-  const s = testService({ STATUS_PUBLIC_URL: 'https://status.example.test' }, { now: clock.now, notifier });
+  const s = testService({ STATUS_PUBLIC_URL: 'https://status.example.test', MAX_SUBSCRIBERS: '2' }, { now: clock.now, notifier });
   const url = 'https://api.example.com/health';
   s.service.put('api', { url, failThreshold: 1, public: true }, 'x');
   s.checker.results.set(url, [FAIL]);
@@ -109,6 +109,22 @@ test('incident updates: written updates appear on the public page; resolved clos
   const unsub = subMail.split(':').slice(3).join(':').split('/').pop();
   s.service.unsubscribe(/** @type {string} */ (unsub));
   assert.equal(s.store.subscriberCounts().total, 0);
+  await s.service.subscribe('victim@example.com');
+  await s.service.subscribe('victim@example.com');
+  assert.equal(mails.filter((m) => m.startsWith('confirm:victim')).length, 1, 'repeats inside the window send nothing');
+  clock.advance(10 * 60_000 + 1);
+  await s.service.subscribe('victim@example.com');
+  assert.equal(mails.filter((m) => m.startsWith('confirm:victim')).length, 2, 'after the window one more confirmation goes out');
+  s.service.maintain();
+  assert.equal(s.store.subscriberByEmail('victim@example.com') !== undefined, true, 'an unconfirmed sign-up lives two hours');
+  clock.advance(2 * 3_600_000 + 1);
+  s.service.maintain();
+  assert.equal(s.store.subscriberByEmail('victim@example.com'), undefined, 'then it is pruned');
+  for (let i = 0; i < 3; i++) await s.service.subscribe(`pending${i}@example.com`);
+  await assert.doesNotReject(s.service.subscribe('late@example.com'), 'unconfirmed sign-ups do not fill the quota');
+  notifier.subscriberConfirm = async () => { throw Object.assign(new Error('atc-notify responded 429'), { status: 429 }); };
+  await assert.doesNotReject(s.service.subscribe('limited@example.com'), 'a notify rate limit answers as if sent');
+  notifier.subscriberConfirm = async (/** @type {string} */ to, /** @type {string} */ link) => { mails.push(`confirm:${to}:${link}`); };
   page = /** @type {any} */ (s.service.publicSummary());
   assert.equal(page.subscribe, true);
 

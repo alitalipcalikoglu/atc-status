@@ -169,6 +169,7 @@ export {};
  * @property {string} email
  * @property {string} token_hash
  * @property {string} unsub_token
+ * @property {number|null} token_at  When the confirmation mail was last sent.
  * @property {number|null} confirmed_at
  * @property {number} created_at
  */

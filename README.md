@@ -71,7 +71,7 @@ Monitors, seeded monitors, incidents, alerts, the status page and the gateway ro
 | `CHECK_RETENTION_DAYS`, `INCIDENT_RETENTION_DAYS` | `14`, `365` | |
 | `STATUS_PAGE_TITLE`, `STATUS_PAGE_CACHE_SEC` | `Service status`, `15` | Public page |
 | `STATUS_PUBLIC_URL` | empty | Where the public page is reachable; with atc-notify configured it turns on e-mail subscriptions (links in mails point here) |
-| `MAX_SUBSCRIBERS` | `2000` | Subscriber list size (0 turns subscriptions off) |
+| `MAX_SUBSCRIBERS` | `2000` | Confirmed subscribers allowed (0 turns subscriptions off); unconfirmed sign-ups do not count and are dropped after two hours |
 | `DNS_SERVERS` | empty | Resolvers for `dns` monitors, e.g. `1.1.1.1,8.8.8.8`; the system's when empty |
 | `NOTIFY_URL`, `NOTIFY_API_KEY`, `ALERT_EMAILS`, `ALERT_APP_NAME`, `NOTIFY_TIMEOUT_MS` | empty, empty, empty, `atc-web`, `10000` | Alerts (URL and key both or neither; recipients required with them) |
 | `HEARTBEAT_URL`, `HEARTBEAT_INTERVAL_SEC` | empty, `60` | Dead man's switch: this service GETs the URL on an interval (a healthchecks-style monitor on another host alerts when the pings stop) |

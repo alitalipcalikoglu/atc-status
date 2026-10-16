@@ -45,7 +45,7 @@ export class Notifier {
       const text = await res.text().catch(() => '');
       let message = `atc-notify responded ${res.status}`;
       try { const j = JSON.parse(text); if (j?.error?.message) message = `atc-notify: ${j.error.message}`; } catch { /* not JSON */ }
-      throw new Error(message);
+      throw Object.assign(new Error(message), { status: res.status });
     }
   }
 

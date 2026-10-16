@@ -121,5 +121,10 @@ export class Database extends CoreDatabase {
       created_at    INTEGER NOT NULL
     );
     `,
+    `
+    -- When the confirmation mail was last sent, so one address cannot be flooded with them.
+    ALTER TABLE subscribers ADD COLUMN token_at INTEGER;
+    UPDATE subscribers SET token_at = created_at;
+    `,
   ];
 }

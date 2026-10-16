@@ -15,6 +15,8 @@ export class StatusService {
   static ID_PATTERN = /^[a-z0-9][a-z0-9-]{0,63}$/;
   static DEFAULTS = Object.freeze({ warnDays: 14, graceSec: 60, description: '', method: 'GET', intervalSec: 60, timeoutMs: 5_000, expectStatus: [200], failThreshold: 2, public: false, paused: false });
   static DAY = 86_400_000;
+  /** One confirmation mail per address per this long; unconfirmed sign-ups live this long times 12. */
+  static CONFIRM_RESEND_MS = 10 * 60_000;
   static HOSTNAME = /^(?=.{1,253}$)([a-z0-9_]([a-z0-9-_]{0,61}[a-z0-9])?\.)*[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?\.?$/i;
   static DNS_TYPES = ['A', 'AAAA', 'CNAME', 'MX', 'TXT', 'NS'];
   static UPDATE_STATUSES = ['investigating', 'identified', 'monitoring', 'resolved'];
@@ -268,13 +270,22 @@ export class StatusService {
     const address = email.trim().toLowerCase();
     if (!/^[^\s@]{1,64}@[^\s@]{1,190}\.[^\s@]{2,}$/.test(address)) throw new StatusError('INVALID_ARGUMENT', 'not an e-mail address');
     const existing = this.store.subscriberByEmail(address);
-    if (existing?.confirmed_at) return;
-    if (!existing && this.store.subscriberCounts().total >= this.config.page.maxSubscribers) throw new StatusError('LIMIT_EXCEEDED', 'the subscriber list is full');
-    const token = randomBytes(24).toString('base64url');
     const now = this.now();
-    if (existing) this.store.subscriberToken(existing.id, StatusService.hashToken(token));
+    if (existing?.confirmed_at) return;
+    // One confirmation mail per address per window: the form is public, so repeats must not flood the address.
+    if (existing && now - Number(existing.token_at ?? existing.created_at) < StatusService.CONFIRM_RESEND_MS) return;
+    // Only confirmed subscribers count toward the quota; unconfirmed sign-ups must not be able to fill it.
+    if (!existing && this.store.subscriberCounts().confirmed >= this.config.page.maxSubscribers) throw new StatusError('LIMIT_EXCEEDED', 'the subscriber list is full');
+    const token = randomBytes(24).toString('base64url');
+    if (existing) this.store.subscriberToken(existing.id, StatusService.hashToken(token), now);
     else this.store.subscriberInsert(Ids.create('sub', now), address, StatusService.hashToken(token), now);
-    await this.notifier.subscriberConfirm(address, `${this.config.page.publicUrl}/status/subscribe/${token}`, this.config.page.title);
+    try {
+      await this.notifier.subscriberConfirm(address, `${this.config.page.publicUrl}/status/subscribe/${token}`, this.config.page.title);
+    } catch (err) {
+      // atc-notify's per-recipient hourly limit: the address is being hammered; answer as if sent, send nothing more.
+      if (/** @type {{ status?: number }} */ (err).status === 429) return;
+      throw err;
+    }
   }
 
   /** @param {string} token */
@@ -301,7 +312,7 @@ export class StatusService {
     const now = this.now();
     return {
       maintenance: this.store.maintPrune(now - this.config.limits.incidentRetentionDays * StatusService.DAY),
-      subscribers: this.store.subscribersPrune(now - 2 * StatusService.DAY),
+      subscribers: this.store.subscribersPrune(now - 12 * StatusService.CONFIRM_RESEND_MS),
       checks: this.store.pruneChecks(now - this.config.limits.checkRetentionDays * StatusService.DAY),
       incidents: this.store.pruneIncidents(now - this.config.limits.incidentRetentionDays * StatusService.DAY),
       alerts: this.store.alertsPrune(now - this.config.limits.incidentRetentionDays * StatusService.DAY),

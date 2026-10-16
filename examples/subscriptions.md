@@ -4,8 +4,8 @@ Visitors can ask for an e-mail when a public monitor goes down or recovers. It n
 
 ## The flow
 
-1. The form posts `email` to `/status/subscribe`. The answer is always "Check your inbox" for a valid address — it does not tell whether the address was already on the list. Ten requests per minute per address.
-2. A confirmation mail links to `/status/subscribe/<token>`. Opening it shows a button; only the button (a POST) confirms, so mail scanners that follow links do not subscribe anyone. Unconfirmed sign-ups are dropped after two days.
+1. The form posts `email` to `/status/subscribe`. The answer is always "Check your inbox" for a valid address — it does not tell whether the address was already on the list. Ten requests per minute per IP, and one confirmation mail per address per ten minutes; a notify rate limit on the address is answered the same way, silently.
+2. A confirmation mail links to `/status/subscribe/<token>`. Opening it shows a button; only the button (a POST) confirms, so mail scanners that follow links do not subscribe anyone. Unconfirmed sign-ups are dropped after two hours and never count toward `MAX_SUBSCRIBERS`.
 3. From then on, an incident opening or closing on a public monitor sends one mail to every confirmed subscriber, with a link to `/status/unsubscribe/<token>` (again a button). The unsubscribe link is the same in every mail.
 
 ## Administration

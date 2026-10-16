@@ -54,9 +54,9 @@ export class StatusStore {
       updOf: raw.prepare('SELECT * FROM incident_updates WHERE incident = ? ORDER BY seq'),
       subByEmail: raw.prepare('SELECT * FROM subscribers WHERE email = ?'),
       subByToken: raw.prepare('SELECT * FROM subscribers WHERE token_hash = ?'),
-      subInsert: raw.prepare('INSERT INTO subscribers (id, email, token_hash, unsub_token, confirmed_at, created_at) VALUES (?, ?, ?, ?, NULL, ?)'),
+      subInsert: raw.prepare('INSERT INTO subscribers (id, email, token_hash, unsub_token, confirmed_at, created_at, token_at) VALUES (?, ?, ?, ?, NULL, ?, ?)'),
       subByUnsub: raw.prepare('SELECT * FROM subscribers WHERE unsub_token = ?'),
-      subToken: raw.prepare('UPDATE subscribers SET token_hash = ? WHERE id = ?'),
+      subToken: raw.prepare('UPDATE subscribers SET token_hash = ?, token_at = ? WHERE id = ?'),
       subConfirm: raw.prepare('UPDATE subscribers SET confirmed_at = ? WHERE id = ? AND confirmed_at IS NULL'),
       subDelete: raw.prepare('DELETE FROM subscribers WHERE id = ?'),
       subConfirmed: raw.prepare('SELECT * FROM subscribers WHERE confirmed_at IS NOT NULL ORDER BY created_at'),
@@ -200,11 +200,11 @@ export class StatusStore {
   /** @param {string} hash @returns {import('../types.js').SubscriberRow|undefined} */
   subscriberByToken(hash) { return /** @type {any} */ (this.stmt.subByToken.get(hash)); }
   /** @param {string} id @param {string} email @param {string} hash @param {number} at */
-  subscriberInsert(id, email, hash, at) { this.stmt.subInsert.run(id, email, hash, randomBytes(24).toString('base64url'), at); }
+  subscriberInsert(id, email, hash, at) { this.stmt.subInsert.run(id, email, hash, randomBytes(24).toString('base64url'), at, at); }
   /** @param {string} token @returns {import('../types.js').SubscriberRow|undefined} */
   subscriberByUnsub(token) { return /** @type {any} */ (this.stmt.subByUnsub.get(token)); }
-  /** @param {string} id @param {string} hash */
-  subscriberToken(id, hash) { this.stmt.subToken.run(hash, id); }
+  /** @param {string} id @param {string} hash @param {number} at */
+  subscriberToken(id, hash, at) { this.stmt.subToken.run(hash, at, id); }
   /** @param {string} id @param {number} at */
   subscriberConfirm(id, at) { return Number(this.stmt.subConfirm.run(at, id).changes) === 1; }
   /** @param {string} id */
