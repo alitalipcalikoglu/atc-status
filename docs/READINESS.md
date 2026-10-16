@@ -5,7 +5,10 @@ Uptime monitoring: HTTP checks of URLs (the platform's `/health` and `/ready` in
 incidents, e-mail alerts through atc-notify and a public status page.
 
 ## Dependencies
-`atc-notify` (optional, alerts), `atc-audit` (optional, events). The monitored URLs are not
+`atc-notify` (optional, incident alerts and subscriber confirmation mail), `atc-audit` (optional,
+audit events), `atc-webhook-out` (optional, `incident.*` events through a publish-role key,
+best effort from a bounded in-memory queue). DNS monitors resolve through `DNS_SERVERS` (the
+system's resolvers when empty). The monitored URLs are not
 dependencies: an unreachable target is a failed check, never a failed service.
 
 ## Persistence
