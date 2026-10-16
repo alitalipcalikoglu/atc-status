@@ -60,7 +60,7 @@ export class StatusStore {
       subConfirm: raw.prepare('UPDATE subscribers SET confirmed_at = ? WHERE id = ? AND confirmed_at IS NULL'),
       subDelete: raw.prepare('DELETE FROM subscribers WHERE id = ?'),
       subConfirmed: raw.prepare('SELECT * FROM subscribers WHERE confirmed_at IS NOT NULL ORDER BY created_at'),
-      subAll: raw.prepare('SELECT * FROM subscribers ORDER BY created_at DESC, id DESC LIMIT ?'),
+      subAll: raw.prepare('SELECT * FROM subscribers WHERE id < ? ORDER BY id DESC LIMIT ?'),
       subCount: raw.prepare('SELECT COUNT(*) AS n, SUM(CASE WHEN confirmed_at IS NOT NULL THEN 1 ELSE 0 END) AS confirmed FROM subscribers'),
       subPrune: raw.prepare('DELETE FROM subscribers WHERE confirmed_at IS NULL AND created_at < ?'),
     };
@@ -212,7 +212,8 @@ export class StatusStore {
   /** @returns {import('../types.js').SubscriberRow[]} */
   subscribersConfirmed() { return /** @type {any} */ (this.stmt.subConfirmed.all()); }
   /** @param {number} limit @returns {import('../types.js').SubscriberRow[]} */
-  subscribers(limit) { return /** @type {any} */ (this.stmt.subAll.all(limit)); }
+  /** Newest first; ids sort by creation time, so the last id of a page is the next cursor. @param {number} limit @param {string} [before] */
+  subscribers(limit, before = '~') { return /** @type {any} */ (this.stmt.subAll.all(before, limit)); }
   subscriberCounts() { const r = this.stmt.subCount.get(); return { total: Number(r?.n ?? 0), confirmed: Number(r?.confirmed ?? 0) }; }
   /** Unconfirmed sign-ups older than the cutoff. @param {number} cutoff */
   subscribersPrune(cutoff) { return Number(this.stmt.subPrune.run(cutoff).changes); }

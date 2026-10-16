@@ -177,7 +177,7 @@ paths:
           description: Every monitor, by id.
           content:
             application/json:
-              schema: { type: object, required: [items], properties: { items: { type: array, items: { $ref: "#/components/schemas/Monitor" } } } }
+              schema: { type: object, required: [items, nextCursor], properties: { items: { type: array, items: { $ref: "#/components/schemas/Monitor" } }, nextCursor: { type: "null", description: Always null; the list is complete. } } }
         "401": { $ref: "#/components/responses/Unauthorized" }
         "403": { $ref: "#/components/responses/Forbidden" }
 
@@ -310,6 +310,8 @@ paths:
     parameters: [{ name: id, in: path, required: true, schema: { type: string, pattern: "^inc_[0-9a-z]{6,12}[0-9a-f]{16}$" } }]
     post:
       operationId: atc-status.incidents.addUpdate
+      parameters:
+        - $ref: '#/components/parameters/IdempotencyKeyHeader'
       summary: Post a written update on an incident (admin)
       description: Shown on the public page under the incident. `resolved` on an open incident closes it (and sends the closing alert).
       tags: [incidents]
@@ -332,6 +334,8 @@ paths:
         "403": { $ref: "#/components/responses/Forbidden" }
     post:
       operationId: atc-status.maintenance.create
+      parameters:
+        - $ref: '#/components/parameters/IdempotencyKeyHeader'
       summary: Plan a maintenance window (admin)
       description: While active, failures of the listed monitors (all when `monitors` is empty or null) open no incident and send no alert; the public page shows the window and those monitors as in maintenance. At most 30 days long.
       tags: [maintenance]
@@ -357,7 +361,7 @@ paths:
         "404": { $ref: "#/components/responses/NotFound" }
 
   /v1/maintenance/{id}:
-    parameters: [{ name: id, in: path, required: true, schema: { type: string, pattern: "^mnt_[0-9a-z]{6,12}[0-9a-f]{12}$" } }]
+    parameters: [{ name: id, in: path, required: true, schema: { type: string, pattern: "^mnt_[0-9a-z]{6,12}[0-9a-f]{16}$" } }]
     delete:
       operationId: atc-status.maintenance.delete
       summary: End or cancel a window (admin)
@@ -373,14 +377,19 @@ paths:
       operationId: atc-status.subscribers.list
       summary: Status page subscribers (admin; contains addresses)
       tags: [subscribers]
+      parameters:
+        - { name: limit, in: query, required: false, description: "1-500, default 100.", schema: { type: string, pattern: "^([1-9]|[1-9][0-9]|[1-4][0-9][0-9]|500)$" } }
+        - { name: cursor, in: query, required: false, description: Opaque `nextCursor` from the previous page., schema: { type: string, pattern: "^sub_[0-9a-z]{6,12}[0-9a-f]{16}$" } }
       responses:
         "200":
-          description: The newest 500 and the totals.
+          description: A page of subscribers, newest first, and the totals.
           content:
             application/json:
               schema:
                 type: object
+                required: [items, nextCursor, counts, enabled]
                 properties:
+                  nextCursor: { type: [string, "null"], description: Pass as `cursor` for older subscribers; null on the last page. }
                   enabled: { type: boolean }
                   counts: { type: object, properties: { total: { type: integer }, confirmed: { type: integer } } }
                   items: { type: array, items: { type: object, properties: { id: { type: string }, email: { type: string }, confirmed: { type: boolean }, confirmedAt: { type: [string, "null"], format: date-time }, createdAt: { type: string, format: date-time } } } }
@@ -388,7 +397,7 @@ paths:
         "403": { $ref: "#/components/responses/Forbidden" }
 
   /v1/subscribers/{id}:
-    parameters: [{ name: id, in: path, required: true, schema: { type: string, pattern: "^sub_[0-9a-z]{6,12}[0-9a-f]{12}$" } }]
+    parameters: [{ name: id, in: path, required: true, schema: { type: string, pattern: "^sub_[0-9a-z]{6,12}[0-9a-f]{16}$" } }]
     delete:
       operationId: atc-status.subscribers.delete
       summary: Remove a subscriber (admin)
@@ -500,6 +509,8 @@ paths:
     parameters: [{ name: id, in: path, required: true, schema: { type: string, pattern: "^alr_[0-9a-z]{6,12}[0-9a-f]{16}$" } }]
     post:
       operationId: atc-status.alerts.ack
+      parameters:
+        - $ref: '#/components/parameters/IdempotencyKeyHeader'
       summary: Acknowledge an alert (admin)
       tags: [alerts]
       responses:
@@ -565,6 +576,12 @@ components:
       scheme: bearer
       description: "`STATUS_API_KEYS=id:secret:role`; role `read` or `admin`."
   parameters:
+    IdempotencyKeyHeader:
+      name: Idempotency-Key
+      in: header
+      required: false
+      description: "Optional. Repeats of this POST with the same key (per API key, 24 h) replay the first 2xx answer with `Idempotent-Replayed: true` instead of running again; the same key with another method, path or body is `409 IDEMPOTENCY_MISMATCH`, while the first still runs `409 IDEMPOTENCY_IN_PROGRESS`."
+      schema: { type: string, pattern: '^[A-Za-z0-9._:-]{8,255}$' }
     MonitorParam: { name: id, in: path, required: true, schema: { type: string, pattern: "^[a-z0-9][a-z0-9-]{0,63}$" } }
   responses:
     BadRequest: { description: "`VALIDATION_FAILED`, `INVALID_ARGUMENT` or `TARGET_NOT_ALLOWED`.", content: { application/json: { schema: { $ref: "#/components/schemas/ErrorEnvelope" } } } }

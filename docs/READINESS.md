@@ -36,7 +36,9 @@ is recorded on the incident (`notifyError`), not retried.
 
 ## Idempotency
 One open incident per monitor (enforced by the database). Alerts carry
-`atc-status:<incident>:<opened|closed>` as the notify idempotency key. Monitor PUT is idempotent.
+`atc-status:<incident>:<opened|closed>` as the notify `Idempotency-Key` header. Monitor PUT is
+idempotent. Incident updates, maintenance creation and alert acks honour `Idempotency-Key` (core
+`Idempotency`, 24 h, per API key and caller): a repeat replays the first 2xx answer.
 
 ## Backup / restore
 The SQLite file. After a restore, monitors continue at their next due time; an incident open at

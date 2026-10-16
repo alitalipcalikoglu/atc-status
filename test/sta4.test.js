@@ -139,6 +139,7 @@ test('HTTP: maintenance and update routes, the public subscription pages, the st
   res = await app.inject({ method: 'POST', url: path });
   assert.match(res.body, /Subscribed/);
   res = await app.inject({ url: '/v1/subscribers', headers: h });
-  assert.deepEqual([res.json().counts.confirmed, res.json().items[0].email], [1, 'someone@example.com']);
+  assert.deepEqual([res.json().counts.confirmed, res.json().items[0].email, res.json().nextCursor], [1, 'someone@example.com', null]);
+  assert.match(res.json().items[0].id, /^sub_[0-9a-z]{6,12}[0-9a-f]{16}$/);
   assert.equal((await app.inject({ method: 'POST', url: '/status/subscribe', payload: 'email=nope', headers: { 'content-type': 'application/x-www-form-urlencoded' } })).statusCode, 400);
 });

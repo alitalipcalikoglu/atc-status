@@ -1,5 +1,5 @@
-import { randomBytes } from 'node:crypto';
 import { Signer } from '@atc-web/atc-service-core/http';
+import { Ids } from '@atc-web/atc-service-core/ids';
 import { StatusError } from './errors.js';
 
 /** @typedef {import('../types.js').AlertRow} AlertRow */
@@ -72,7 +72,7 @@ export class AlertService {
       this.store.alertBump(recent.id, now, message, payload);
       return { outcome: 'repeated', id: recent.id };
     }
-    const id = `alr_${now.toString(36)}${randomBytes(8).toString('hex')}`;
+    const id = Ids.create('alr', now);
     this.store.alertInsert({ id, type, key, severity, title, message, data: payload, source, at: now });
     this.logger?.warn({ alert: id, type, key }, 'alert raised');
     if (this.notifier) {

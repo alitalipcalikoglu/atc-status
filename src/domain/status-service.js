@@ -1,4 +1,5 @@
 import { createHash, randomBytes, timingSafeEqual } from 'node:crypto';
+import { Ids } from '@atc-web/atc-service-core/ids';
 import { StatusError } from './errors.js';
 
 /** @typedef {import('../types.js').MonitorRow} MonitorRow */
@@ -209,7 +210,7 @@ export class StatusService {
     const monitors = input.monitors?.length ? [...new Set(input.monitors)] : null;
     for (const id of monitors ?? []) this.get(id);
     const now = this.now();
-    const id = `mnt_${now.toString(36)}${randomBytes(6).toString('hex')}`;
+    const id = Ids.create('mnt', now);
     this.store.maintInsert({ id, title: input.title, message: input.message ?? '', monitors: monitors ? JSON.stringify(monitors) : null, starts_at: starts, ends_at: ends, created_by: by, created_at: now });
     this.pageCache = null;
     return /** @type {import('../types.js').MaintenanceRow} */ (this.store.maint(id));
@@ -272,7 +273,7 @@ export class StatusService {
     const token = randomBytes(24).toString('base64url');
     const now = this.now();
     if (existing) this.store.subscriberToken(existing.id, StatusService.hashToken(token));
-    else this.store.subscriberInsert(`sub_${now.toString(36)}${randomBytes(6).toString('hex')}`, address, StatusService.hashToken(token), now);
+    else this.store.subscriberInsert(Ids.create('sub', now), address, StatusService.hashToken(token), now);
     await this.notifier.subscriberConfirm(address, `${this.config.page.publicUrl}/status/subscribe/${token}`, this.config.page.title);
   }
 
@@ -396,7 +397,7 @@ export class StatusService {
     } else if (!r.ok && open) {
       this.store.failIncident(open.id, String(r.error));
     } else if (!r.ok && failures >= m.fail_threshold && !this.maintenanceOf(id, at)) {
-      const incidentId = `inc_${at.toString(36)}${randomBytes(8).toString('hex')}`;
+      const incidentId = Ids.create('inc', at);
       this.store.openIncident(incidentId, id, at, String(r.error), failures);
       await this.#notify('opened', /** @type {IncidentRow} */ (this.store.incident(incidentId)), m);
     }

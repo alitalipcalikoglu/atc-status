@@ -33,7 +33,7 @@ export class Schemas {
     properties: { state: { type: 'string', enum: ['open', 'acked'] }, limit: { type: 'string', pattern: '^([1-9]|[1-9][0-9]|100)$' }, cursor: { type: 'string', pattern: '^[0-9]{1,15}~alr_[0-9a-z]{6,12}[0-9a-f]{16}$' } },
   };
 
-  static maintenanceId = { type: 'string', pattern: '^mnt_[0-9a-z]{6,12}[0-9a-f]{12}$' };
+  static maintenanceId = { type: 'string', pattern: '^mnt_[0-9a-z]{6,12}[0-9a-f]{16}$' };
   static maintenanceParams = { type: 'object', properties: { id: Schemas.maintenanceId }, required: ['id'] };
   static createMaintenance = {
     type: 'object', additionalProperties: false, required: ['title', 'startsAt', 'endsAt'],
@@ -44,7 +44,8 @@ export class Schemas {
     },
   };
   static incidentUpdate = { type: 'object', additionalProperties: false, required: ['status', 'message'], properties: { status: { type: 'string', enum: ['investigating', 'identified', 'monitoring', 'resolved'] }, message: { type: 'string', minLength: 1, maxLength: 2_000 } } };
-  static subscriberParams = { type: 'object', properties: { id: { type: 'string', pattern: '^sub_[0-9a-z]{6,12}[0-9a-f]{12}$' } }, required: ['id'] };
+  static subscriberParams = { type: 'object', properties: { id: { type: 'string', pattern: '^sub_[0-9a-z]{6,12}[0-9a-f]{16}$' } }, required: ['id'] };
+  static subscribersQuery = { type: 'object', additionalProperties: false, properties: { limit: { type: 'string', pattern: '^([1-9]|[1-9][0-9]|[1-4][0-9][0-9]|500)$' }, cursor: { type: 'string', pattern: '^sub_[0-9a-z]{6,12}[0-9a-f]{16}$' } } };
   static tokenParams = { type: 'object', properties: { token: { type: 'string', pattern: '^[A-Za-z0-9_-]{20,64}$' } }, required: ['token'] };
 
   static monitorParams = { type: 'object', properties: { id: Schemas.monitorId }, required: ['id'] };

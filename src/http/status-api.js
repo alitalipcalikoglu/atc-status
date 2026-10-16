@@ -3,6 +3,7 @@ import rateLimit from '@fastify/rate-limit';
 import Fastify from 'fastify';
 import { AuditClient } from '@atc-web/atc-service-core/audit';
 import { createErrorHandler, registerInfo, registerOpenApi, registerProbes, registerRequestContext, requestOptions } from '@atc-web/atc-service-core/fastify';
+import { Idempotency } from '@atc-web/atc-service-core/idempotency';
 import { StatusError } from '../domain/errors.js';
 import { ApiKeyAuth } from './api-key-auth.js';
 import { Schemas } from './schemas.js';
@@ -69,6 +70,8 @@ export class StatusApi {
       reply.header('x-content-type-options', 'nosniff');
       if (!reply.hasHeader('cache-control')) reply.header('cache-control', 'no-store');
     });
+    // Opt-in per route (config.idempotent): repeats with the same Idempotency-Key replay the first 2xx answer.
+    Idempotency.register(app, { raw: this.db.raw });
     registerProbes(app, () => this.db.ping(), {
       cacheMs: StatusApi.READY_CACHE_MS,
       extra: () => ({ monitors: this.service.store.count(), checker: this.service.stopping.signal.aborted ? 'stopped' : 'running', notify: config.notify ? 'enabled' : 'disabled', alertHook: config.alertHookSecret ? 'enabled' : 'disabled' }),
@@ -159,7 +162,7 @@ export class StatusApi {
     const mid = (/** @type {FastifyRequest} */ r) => /** @type {{ id: string }} */ (r.params).id;
     const target = (/** @type {FastifyRequest} */ r) => ({ type: 'monitor', id: mid(r) });
 
-    api.get('/monitors', read, async () => ({ items: s.list().map((m) => Views.monitor(m, s)) }));
+    api.get('/monitors', read, async () => ({ items: s.list().map((m) => Views.monitor(m, s)), nextCursor: null }));
 
     api.put('/monitors/:id', { config: { audit: AuditClient.route('atc-status.monitor.upsert', target, (r, b) => ({ created: b?.created, settings: r.body })) }, ...admin, schema: { params: Schemas.monitorParams, body: Schemas.putMonitor } }, async (request, reply) => {
       const { monitor, created, pingToken } = s.put(mid(request), /** @type {any} */ (request.body ?? {}), request.apiKey.id);
@@ -207,18 +210,24 @@ export class StatusApi {
       return { incident: Views.incident(i, s.now()), updates: s.store.updates(i.id).map(Views.update) };
     });
 
-    api.post('/incidents/:id/updates', { config: { audit: AuditClient.route('atc-status.incident.update', (r) => ({ type: 'incident', id: mid(r) }), (r) => ({ status: /** @type {any} */ (r.body).status })) }, ...admin, schema: { params: Schemas.incidentParams, body: Schemas.incidentUpdate } }, async (request, reply) => {
+    api.post('/incidents/:id/updates', { config: { idempotent: true, audit: AuditClient.route('atc-status.incident.update', (r) => ({ type: 'incident', id: mid(r) }), (r) => ({ status: /** @type {any} */ (r.body).status })) }, ...admin, schema: { params: Schemas.incidentParams, body: Schemas.incidentUpdate } }, async (request, reply) => {
       const r = await s.updateIncident(mid(request), /** @type {any} */ (request.body), request.apiKey.id);
       return reply.code(201).send({ incident: Views.incident(r.incident, s.now()), updates: r.updates.map(Views.update) });
     });
 
     // ---- maintenance windows
     api.get('/maintenance', read, async () => { const r = s.listMaintenance(); const now = s.now(); return { current: r.current.map((w) => Views.maintenance(w, now)), past: r.past.map((w) => Views.maintenance(w, now)) }; });
-    api.post('/maintenance', { config: { audit: AuditClient.route('atc-status.maintenance.create', (_r, b) => ({ type: 'maintenance', id: b?.maintenance?.id ?? '' }), (r) => ({ startsAt: /** @type {any} */ (r.body).startsAt, endsAt: /** @type {any} */ (r.body).endsAt })) }, ...admin, schema: { body: Schemas.createMaintenance } }, async (request, reply) => reply.code(201).send({ maintenance: Views.maintenance(s.createMaintenance(/** @type {any} */ (request.body), request.apiKey.id), s.now()) }));
+    api.post('/maintenance', { config: { idempotent: true, audit: AuditClient.route('atc-status.maintenance.create', (_r, b) => ({ type: 'maintenance', id: b?.maintenance?.id ?? '' }), (r) => ({ startsAt: /** @type {any} */ (r.body).startsAt, endsAt: /** @type {any} */ (r.body).endsAt })) }, ...admin, schema: { body: Schemas.createMaintenance } }, async (request, reply) => reply.code(201).send({ maintenance: Views.maintenance(s.createMaintenance(/** @type {any} */ (request.body), request.apiKey.id), s.now()) }));
     api.delete('/maintenance/:id', { config: { audit: AuditClient.route('atc-status.maintenance.delete', (r) => ({ type: 'maintenance', id: mid(r) })) }, ...admin, schema: { params: Schemas.maintenanceParams } }, async (request, reply) => { s.deleteMaintenance(mid(request)); return reply.code(204).send(); });
 
     // ---- status page subscribers (addresses: admin keys only)
-    api.get('/subscribers', admin, async () => ({ items: s.store.subscribers(500).map(Views.subscriber), counts: s.store.subscriberCounts(), enabled: s.subscriptionsEnabled }));
+    api.get('/subscribers', { ...admin, schema: { querystring: Schemas.subscribersQuery } }, async (request) => {
+      const q = /** @type {{ limit?: string, cursor?: string }} */ (request.query);
+      const limit = q.limit ? Number(q.limit) : 100;
+      const rows = s.store.subscribers(limit + 1, q.cursor);
+      const page = rows.slice(0, limit);
+      return { items: page.map(Views.subscriber), nextCursor: rows.length > limit ? page[page.length - 1].id : null, counts: s.store.subscriberCounts(), enabled: s.subscriptionsEnabled };
+    });
     api.delete('/subscribers/:id', { config: { audit: AuditClient.route('atc-status.subscriber.delete', (r) => ({ type: 'subscriber', id: mid(r) })) }, ...admin, schema: { params: Schemas.subscriberParams } }, async (request, reply) => { s.deleteSubscriber(mid(request)); return reply.code(204).send(); });
 
     api.get('/alerts', { ...read, schema: { querystring: Schemas.alertsQuery } }, async (request) => {
@@ -231,7 +240,7 @@ export class StatusApi {
       return { items: page.map(Views.alert), nextCursor: rows.length > limit && last ? `${last.last_at}~${last.id}` : null };
     });
 
-    api.post('/alerts/:id/ack', { config: { audit: AuditClient.route('atc-status.alert.ack', (r) => ({ type: 'alert', id: mid(r) })) }, ...admin, schema: { params: Schemas.alertParams } }, async (request) => ({ alert: Views.alert(this.alerts.ack(mid(request), request.apiKey.id)) }));
+    api.post('/alerts/:id/ack', { config: { idempotent: true, audit: AuditClient.route('atc-status.alert.ack', (r) => ({ type: 'alert', id: mid(r) })) }, ...admin, schema: { params: Schemas.alertParams } }, async (request) => ({ alert: Views.alert(this.alerts.ack(mid(request), request.apiKey.id)) }));
 
     api.get('/stats', read, async () => s.stats());
   }

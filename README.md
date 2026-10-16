@@ -42,13 +42,18 @@ Tests and type check: `npm test`, `npm run typecheck`.
 | POST | `/v1/incidents/:id/updates` | admin | Written update (`investigating`, `identified`, `monitoring`, `resolved`); `resolved` closes an open incident |
 | GET / POST | `/v1/maintenance` | read / admin | Maintenance windows; plan one |
 | DELETE | `/v1/maintenance/:id` | admin | End or cancel a window |
-| GET | `/v1/subscribers` | admin | Status page subscribers and totals |
+| GET | `/v1/subscribers` | admin | Status page subscribers (`limit`, `cursor`) and totals |
 | DELETE | `/v1/subscribers/:id` | admin | Remove a subscriber |
 | POST | `/status/subscribe` | none | Subscription form of the public page (double opt-in) |
 | GET / POST | `/status/subscribe/:token`, `/status/unsubscribe/:token` | link | Confirm; leave the list (GET shows a button, POST acts) |
 | GET | `/v1/stats` | read | Monitors by state, open and recent incidents |
 
 Errors: `{ "error": { "code", "message" } }` — `VALIDATION_FAILED`, `INVALID_ARGUMENT`, `TARGET_NOT_ALLOWED` (400), `FORBIDDEN` (403), `MONITOR_NOT_FOUND`, `INCIDENT_NOT_FOUND`, `ALERT_NOT_FOUND`, `HOOK_DISABLED` (404), `INVALID_SIGNATURE` (401), `INVALID_STATE`, `LIMIT_EXCEEDED` (409), `RATE_LIMITED` (429). Full contract: [openapi.yaml](openapi.yaml).
+
+## Conventions
+
+- Lists answer `{ items, nextCursor }`; pass `nextCursor` back as `cursor`. Monitors are a complete list (`nextCursor: null`); incidents, alerts and subscribers page newest first. Incidents, alerts, maintenance windows and subscribers have `<prefix>_<time><random>` ids (the platform's one id format); monitor ids are natural keys.
+- Incident updates, maintenance creation and alert acks honour `Idempotency-Key`: a repeat with the same key (per API key and caller — the console's `X-Actor` counts — for 24 h) replays the first 2xx answer with `Idempotent-Replayed: true`; another body is `409 IDEMPOTENCY_MISMATCH`. Monitor PUT is never cached because it can return a ping token.
 
 ## Examples
 
